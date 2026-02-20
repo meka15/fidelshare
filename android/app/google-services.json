@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "726631131646",
+    "project_id": "fidelshare",
+    "storage_bucket": "fidelshare.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:726631131646:android:98bdbf9e6e505142c178af",
+        "android_client_info": {
+          "package_name": "com.example.fidelshare"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA9IvJ15noksKjWSpNBgAenXRp61LgxjUY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
