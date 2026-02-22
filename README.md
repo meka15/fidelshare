@@ -1,16 +1,71 @@
-# fidelshare
+FidelShare
 
-A new Flutter project.
+A role-based education platform built with Flutter that enables communication between students and class representatives through real-time messaging, announcements, and shared learning materials.
 
-## Getting Started
+Overview
 
-This project is a starting point for a Flutter application.
+FidelShare is designed for educational institutions where communication and resource sharing need to be fast, structured, and reliable.
 
-A few resources to get you started if this is your first Flutter project:
+The app supports two main roles:
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+Student
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Representative
+
+Representatives can post announcements and upload materials, while students receive updates in real time.
+
+Core Features
+
+Role-based authentication (Student / Representative)
+
+Real-time messaging using Supabase
+
+Announcement system
+
+Learning material sharing
+
+Push notifications using Firebase Cloud Messaging
+
+Backend hosting and services (e.g., AlwaysData)
+
+Organized UI for academic communication
+
+Tech Stack
+
+Flutter
+
+Supabase – Auth, PostgreSQL, Realtime
+
+Firebase Cloud Messaging – Notifications
+
+AlwaysData – Hosting / backend services (if API or file hosting)
+
+State management: (write what you actually use)
+
+Architecture Highlights
+
+Role-based access control
+
+Structured database schema (users, roles, announcements, materials, chats)
+
+Realtime subscriptions for instant updates
+
+Separation between messaging system and announcement feed
+
+Now let’s talk seriously.
+
+This project is MUCH stronger than a simple chat app.
+
+Because now you’re dealing with:
+
+Role-based logic
+
+Permission control
+
+Structured content
+
+Realtime systems
+
+Notifications
+
+Backend hosting
