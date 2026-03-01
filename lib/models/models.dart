@@ -288,6 +288,32 @@ class ChatMessage {
       'section': section,
     };
   }
+
+  /// Converts from a local SQLite database row.
+  factory ChatMessage.fromDb(Map<String, dynamic> row) {
+    return ChatMessage(
+      id: row['id'] as String,
+      role: row['role'] as String? ?? 'user',
+      senderId: row['sender_id'] as String,
+      senderName: row['sender_name'] as String,
+      text: row['text'] as String,
+      timestamp: row['timestamp'] as int,
+      section: (row['section_id'] as int).toString(),
+    );
+  }
+
+  /// Converts to a local SQLite database row.
+  Map<String, dynamic> toDb(int sectionId) {
+    return {
+      'id': id,
+      'role': role,
+      'sender_id': senderId,
+      'sender_name': senderName,
+      'text': text,
+      'timestamp': timestamp,
+      'section_id': sectionId,
+    };
+  }
 }
 
 class AppNotification {
