@@ -24,10 +24,11 @@ void callbackDispatcher() {
       await NotificationService.initialize(isBackground: true);
 
       if (task == 'checkUpdatesTask' || task == Workmanager.iOSBackgroundTask) {
-        // Run both checks in parallel like Telegram
+        // Run checks in parallel
         await Future.wait([
           _checkNewUpdates(),
           _syncMissedMessages(),
+          _checkUpcomingClasses(),
         ]);
       }
 
@@ -51,7 +52,7 @@ Future<void> _syncMissedMessages() async {
         .order('timestamp', ascending: false)
         .limit(20);
 
-    if (response != null && response is List) {
+     if (response != null && response is List) {
       final messages = response.map((m) => ChatMessage(
         id: m['id'].toString(),
         role: m['sender_id'] == client.auth.currentUser?.id ? 'user' : 'model',
@@ -62,8 +63,22 @@ Future<void> _syncMissedMessages() async {
         section: m['section']?.toString() ?? '',
       )).toList();
 
+      int newCount = 0;
+      for (var msg in messages) {
+        // We only notify for messages from others (role: 'model') 
+        // that haven't been seen in our local DB yet.
+        final exists = await localDb.getMessages(msg.section, limit: 50); 
+        if (!exists.any((e) => e.id == msg.id) && msg.role == 'model') {
+          await NotificationService.showLocalNotification(
+            title: msg.senderName,
+            body: msg.text,
+          );
+          newCount++;
+        }
+      }
+      
       await localDb.insertMessages(messages);
-      debugPrint("Background Sync: ${messages.length} messages synced.");
+      debugPrint("Background Sync: ${messages.length} messages synced, $newCount new notifications.");
     }
   } catch (e) {
     debugPrint("Background Message Sync Error: $e");
@@ -124,5 +139,31 @@ class BackgroundService {
         networkType: NetworkType.connected,
       ),
     );
+  }
+}
+
+Future<void> _checkUpcomingClasses() async {
+  try {
+    // We fetch classes from local DB to see what's coming
+    final db = await DataService.getLocalData();
+    final now = DateTime.now();
+    
+    for (var session in db.classes) {
+      if (session.status == 'cancelled') continue;
+      
+      // Calculate next occurrence
+      final startTime = session.startTime;
+      final diff = startTime.difference(now);
+      
+      // If a class is starting in the next 20 minutes (and we are checking every 15)
+      if (diff.inMinutes > 0 && diff.inMinutes <= 20) {
+        NotificationService.showLocalNotification(
+          title: 'Class Starting Soon!',
+          body: '${session.name} starts in ${diff.inMinutes} mins at ${session.room}',
+        );
+      }
+    }
+  } catch (e) {
+    debugPrint("Background Class Check Error: $e");
   }
 }

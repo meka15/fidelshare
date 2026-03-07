@@ -307,4 +307,49 @@ class NotificationService {
       'updated_at': DateTime.now().toIso8601String(),
     }, onConflict: 'token');
   }
+
+  static Future<void> scheduleClassNotifications(List<ClassSession> classes) async {
+    try {
+      // 1. Cancel all previous class notifications to avoid duplicates
+      // We use a specific range of IDs for classes (e.g., 2000-3000)
+      for (int i = 2000; i < 2100; i++) {
+        await _local.cancel(i);
+      }
+
+      final now = DateTime.now();
+      int idOffset = 2000;
+
+      for (var session in classes) {
+        if (session.status == 'cancelled') continue;
+
+        // Calculate next occurrence
+        DateTime scheduledDate = session.startTime;
+        
+        // If it's more than 10 minutes from now, schedule it
+        if (scheduledDate.isAfter(now.add(const Duration(minutes: 5)))) {
+          final notifyTime = scheduledDate.subtract(const Duration(minutes: 10));
+          
+          if (notifyTime.isAfter(now)) {
+            debugPrint("Scheduling Notification for ${session.name} at $notifyTime");
+            
+            await _local.show(
+              idOffset++,
+              'Upcoming Class: ${session.name}',
+              'Starting in 10 minutes at ${session.room}',
+              const NotificationDetails(
+                android: AndroidNotificationDetails(
+                  'class_reminders',
+                  'Class Reminders',
+                  importance: Importance.max,
+                  priority: Priority.high,
+                ),
+              ),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint("Error scheduling class notifications: $e");
+    }
+  }
 }
