@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:intl/intl.dart';
 import '../models/models.dart';
 import '../services/supabase_service.dart';
+import '../services/local_database_service.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 class ChatScreen extends StatefulWidget {
   final Student student;
@@ -17,8 +20,11 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scroll = ScrollController();
+  final LocalDatabaseService _localDb = LocalDatabaseService();
   
   bool _isSending = false;
+  bool _isLoadingOldMessages = false;
+  bool _hasMoreOlderMessages = true;
   String _connectionStatus = 'connecting';
   List<ChatMessage> _messages = [];
   int? _sectionId;
@@ -33,15 +39,46 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    _scroll.addListener(_onScroll);
     _initChat();
+    _checkConnectivity();
   }
 
   @override
   void dispose() {
     if (_channel != null) SupabaseService.client.removeChannel(_channel!);
     _controller.dispose();
+    _scroll.removeListener(_onScroll);
     _scroll.dispose();
     super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scroll.position.pixels <= _scroll.position.minScrollExtent + 50 &&
+        !_isLoadingOldMessages &&
+        _hasMoreOlderMessages) {
+      _loadOlderMessages();
+    }
+  }
+
+  Future<void> _checkConnectivity() async {
+    final connectivityResult = await (Connectivity().checkConnectivity());
+    if (connectivityResult.contains(ConnectivityResult.none)) {
+      setState(() => _connectionStatus = 'offline');
+    } else {
+      setState(() => _connectionStatus = 'online');
+    }
+    
+    Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) {
+      if (results.contains(ConnectivityResult.none)) {
+        setState(() => _connectionStatus = 'offline');
+      } else {
+        setState(() => _connectionStatus = 'online');
+        if (_sectionId != null) {
+          _syncNewMessages();
+        }
+      }
+    });
   }
 
   // --- UI COMPONENTS ---
@@ -60,6 +97,38 @@ class _ChatScreenState extends State<ChatScreen> {
       child: Text(
         initial,
         style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: size * 0.4),
+      ),
+    );
+  }
+
+  Widget _buildDateSeparator(int timestamp) {
+    final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
+    final now = DateTime.now();
+    final isToday = date.year == now.year && date.month == now.month && date.day == now.day;
+    final isYesterday = date.year == now.year && date.month == now.month && date.day == now.day - 1;
+    
+    String label;
+    if (isToday) {
+      label = "Today";
+    } else if (isYesterday) {
+      label = "Yesterday";
+    } else {
+      label = DateFormat('MMMM d, yyyy').format(date);
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      alignment: Alignment.center,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        decoration: BoxDecoration(
+          color: _bgLight,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(fontSize: 12, color: _textGray, fontWeight: FontWeight.w500),
+        ),
       ),
     );
   }
@@ -132,7 +201,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                 ),
                 const SizedBox(width: 6),
-                Text('Section ${_sectionId ?? "Loading..."} • Active', style: TextStyle(fontSize: 11, color: _textGray)),
+                Text('Section ${_sectionId ?? "Loading..."} • ${_connectionStatus == 'online' ? 'Active' : 'Offline'}', style: TextStyle(fontSize: 11, color: _textGray)),
               ],
             ),
           ],
@@ -152,12 +221,38 @@ class _ChatScreenState extends State<ChatScreen> {
                 : ListView.builder(
                     controller: _scroll,
                     padding: const EdgeInsets.all(20),
-                    itemCount: _messages.length,
+                    itemCount: _messages.length + (_isLoadingOldMessages ? 1 : 0),
                     itemBuilder: (context, index) {
-                      final msg = _messages[index];
+                      if (index == 0 && _isLoadingOldMessages) {
+                        return const Center(child: Padding(
+                          padding: EdgeInsets.all(8.0),
+                          child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)),
+                        ));
+                      }
+                      
+                      final msgIndex = _isLoadingOldMessages ? index - 1 : index;
+                      final msg = _messages[msgIndex];
                       final isMe = msg.senderId == widget.userId;
-                      final bool showName = index == 0 || _messages[index - 1].senderId != msg.senderId;
-                      return _buildBubble(msg, isMe, showName);
+                      
+                      bool showDate = true;
+                      if (msgIndex > 0) {
+                        final prevMsg = _messages[msgIndex - 1];
+                        final date1 = DateTime.fromMillisecondsSinceEpoch(msg.timestamp);
+                        final date2 = DateTime.fromMillisecondsSinceEpoch(prevMsg.timestamp);
+                        if (date1.year == date2.year && date1.month == date2.month && date1.day == date2.day) {
+                          showDate = false;
+                        }
+                      }
+                      
+                      final bool showName = msgIndex == 0 || showDate || _messages[msgIndex - 1].senderId != msg.senderId;
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (showDate) _buildDateSeparator(msg.timestamp),
+                          _buildBubble(msg, isMe, showName),
+                        ],
+                      );
                     },
                   ),
           ),
@@ -216,7 +311,8 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _initChat() async {
     await _loadSectionId();
     if (_sectionId != null) {
-      await _fetchMessages();
+      await _loadLocalMessages();
+      _syncNewMessages();
       _subscribeRealtime();
     }
   }
@@ -228,10 +324,36 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Future<void> _fetchMessages() async {
-    final List<dynamic> data = await SupabaseService.client.from('chat_messages').select().eq('section', _sectionId!).order('timestamp', ascending: true);
+  Future<void> _loadLocalMessages() async {
+    final localMsgs = await _localDb.getMessages(_sectionId.toString(), limit: 20);
     setState(() {
-      _messages = data.map((m) => ChatMessage(
+      _messages = localMsgs.reversed.toList();
+    });
+    // Scroll to bottom only initially
+    if (_messages.isNotEmpty) {
+      _scrollToBottom();
+    }
+  }
+
+  Future<void> _syncNewMessages() async {
+    if (_connectionStatus == 'offline' || _sectionId == null) return;
+
+    int? latestTimestamp = await _localDb.getLatestTimestamp(_sectionId.toString());
+    
+    SupabaseQueryBuilder query = SupabaseService.client.from('chat_messages');
+    PostgrestFilterBuilder filter = query.select().eq('section', _sectionId!);
+    
+    List<dynamic> data;
+    if (latestTimestamp != null) {
+      data = await filter.gt('timestamp', latestTimestamp).order('timestamp', ascending: true);
+    } else {
+      // If we don't have any local messages, we should probably fetch the latest 20
+      data = await filter.order('timestamp', ascending: false).limit(20);
+      data = data.reversed.toList();
+    }
+
+    if (data.isNotEmpty) {
+      final newMessages = data.map((m) => ChatMessage(
         id: m['id'].toString(),
         role: m['role'] ?? 'user',
         senderId: m['sender_id'] ?? '',
@@ -240,8 +362,91 @@ class _ChatScreenState extends State<ChatScreen> {
         timestamp: (m['timestamp'] as num).toInt(),
         section: m['section']?.toString() ?? '',
       )).toList();
-    });
-    _scrollToBottom();
+      
+      await _localDb.insertMessages(newMessages);
+      
+      setState(() {
+        for (var msg in newMessages) {
+          if (!_messages.any((e) => e.id == msg.id)) {
+            _messages.add(msg);
+          }
+        }
+        _messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      });
+      _scrollToBottom();
+    }
+  }
+
+  Future<void> _loadOlderMessages() async {
+    if (_isLoadingOldMessages || _messages.isEmpty || _sectionId == null) return;
+    
+    setState(() => _isLoadingOldMessages = true);
+    
+    try {
+      final oldestTimestamp = _messages.first.timestamp;
+      
+      // Try local DB first
+      List<ChatMessage> olderMessages = await _localDb.getMessages(
+        _sectionId.toString(), 
+        beforeTimestamp: oldestTimestamp, 
+        limit: 20
+      );
+
+      // If local DB doesn't have 20 messages, we try fetching from remote
+      if (olderMessages.length < 20 && _connectionStatus == 'online') {
+        final data = await SupabaseService.client.from('chat_messages')
+            .select()
+            .eq('section', _sectionId!)
+            .lt('timestamp', oldestTimestamp)
+            .order('timestamp', ascending: false)
+            .limit(20);
+            
+        final remoteMessages = data.map((m) => ChatMessage(
+            id: m['id'].toString(),
+            role: m['role'] ?? 'user',
+            senderId: m['sender_id'] ?? '',
+            senderName: m['sender_name'] ?? 'Unknown',
+            text: m['text'] ?? '',
+            timestamp: (m['timestamp'] as num).toInt(),
+            section: m['section']?.toString() ?? '',
+          )).toList();
+          
+        if (remoteMessages.isNotEmpty) {
+          await _localDb.insertMessages(remoteMessages);
+          olderMessages = remoteMessages; // Use remote, as we should have all or overlapping
+        }
+      }
+
+      if (olderMessages.isEmpty) {
+        setState(() => _hasMoreOlderMessages = false);
+      } else {
+        // Remember current scroll position to maintain it
+        final double currentPosition = _scroll.position.pixels;
+        final double maxScroll = _scroll.position.maxScrollExtent;
+        
+        setState(() {
+          // Merge old messages, ensuring no duplicates
+          for (var msg in olderMessages) {
+            if (!_messages.any((e) => e.id == msg.id)) {
+              _messages.insert(0, msg);
+            }
+          }
+          _messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+        });
+        
+        // Wait for frame to calculate new extent and maintain scroll position
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_scroll.hasClients) {
+            final double newMaxScroll = _scroll.position.maxScrollExtent;
+            _scroll.jumpTo(currentPosition + (newMaxScroll - maxScroll));
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading older messages: \$e");
+    } finally {
+      setState(() => _isLoadingOldMessages = false);
+    }
   }
 
   void _subscribeRealtime() {
@@ -261,17 +466,30 @@ class _ChatScreenState extends State<ChatScreen> {
           timestamp: (m['timestamp'] as num).toInt(),
           section: m['section']?.toString() ?? '',
         );
-        setState(() { if (!_messages.any((e) => e.id == msg.id)) _messages.add(msg); });
+        
+        _localDb.insertMessage(msg);
+
+        setState(() { 
+          if (!_messages.any((e) => e.id == msg.id)) {
+            _messages.add(msg); 
+          }
+        });
         _scrollToBottom();
       },
     ).subscribe((status, [_]) {
-      setState(() => _connectionStatus = status == RealtimeSubscribeStatus.subscribed ? 'online' : 'offline');
+      // status could be used to update connection UI, but we already use connectivity_plus
     });
   }
 
   Future<void> _sendMessage() async {
     final text = _controller.text.trim();
     if (text.isEmpty || _isSending) return;
+    
+    if (_connectionStatus == 'offline') {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cannot send messages while offline')));
+      return;
+    }
+    
     _controller.clear();
     setState(() => _isSending = true);
     try {
