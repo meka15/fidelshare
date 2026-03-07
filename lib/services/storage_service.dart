@@ -3,8 +3,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-const String uploadEndpoint = 'https://mekbib.alwaysdata.net/students/upload.php';
+String get uploadEndpoint => dotenv.get('UPLOAD_ENDPOINT', fallback: 'https://mekbib.alwaysdata.net/students/upload.php');
 
 String get storageProviderLabel => 'alwaysdata.net';
 
