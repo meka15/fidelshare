@@ -4,10 +4,18 @@ import 'services/supabase_service.dart';
 import 'services/notification_service.dart';
 import 'services/background_service.dart';
 import 'screens/app_root.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 void main() async {
   // 1. Ensure Flutter is ready
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Load environment variables
+  try {
+    await dotenv.load(fileName: "assets/.env");
+  } catch (e) {
+    debugPrint("DotEnv Init Error: $e");
+  }
 
   // Avoid runtime font downloads (prevents crashes when offline)
   GoogleFonts.config.allowRuntimeFetching = false;
@@ -32,6 +40,7 @@ void main() async {
   try {
     await BackgroundService.initialize();
     await BackgroundService.registerPeriodicTask();
+    await BackgroundService.registerOneOffTask(); // For immediate testing
   } catch (e) {
     debugPrint("Background Service Error: $e");
   }

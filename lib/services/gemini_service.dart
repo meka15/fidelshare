@@ -1,9 +1,8 @@
 import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class GeminiService {
-  // TODO: Replace with your actual Gemini API Key
-  // Ideally, store this securely (e.g., --dart-define, .env)
-  static const String _apiKey = 'YOUR_GEMINI_API_KEY'; 
+  static String get _apiKey => dotenv.get('GEMINI_API_KEY', fallback: 'YOUR_GEMINI_API_KEY'); 
 
   static Future<String> draftMessage(String className, String instructorName, String topic) async {
     try {

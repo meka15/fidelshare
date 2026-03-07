@@ -2,20 +2,23 @@ import 'package:workmanager/workmanager.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'supabase_service.dart';
 import 'notification_service.dart';
+import 'local_database_service.dart';
 import '../models/models.dart';
+import 'package:flutter/foundation.dart';
 
 @pragma('vm:entry-point')
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
     try {
-      // 1. Initialize core services
       await SupabaseService.initialize();
-      await NotificationService.initialize();
+      await NotificationService.initialize(isBackground: true);
 
-      // 2. Perform the background work
-      // Example: Fetch latest announcements or check for new materials
-      if (task == 'checkUpdatesTask') {
-        await _checkNewUpdates();
+      if (task == 'checkUpdatesTask' || task == Workmanager.iOSBackgroundTask) {
+        // Run both checks in parallel like Telegram
+        await Future.wait([
+          _checkNewUpdates(),
+          _syncMissedMessages(),
+        ]);
       }
 
       return Future.value(true);
@@ -23,6 +26,38 @@ void callbackDispatcher() {
       return Future.value(false);
     }
   });
+}
+
+Future<void> _syncMissedMessages() async {
+  try {
+    final client = SupabaseService.client;
+    final localDb = LocalDatabaseService();
+    
+    // In a Telegram-like setup, we'd sync all relevant sections. 
+    // Here we'll fetch recently created messages across all sections for the user
+    final response = await client
+        .from('chat_messages')
+        .select()
+        .order('timestamp', ascending: false)
+        .limit(20);
+
+    if (response != null && response is List) {
+      final messages = response.map((m) => ChatMessage(
+        id: m['id'].toString(),
+        role: m['sender_id'] == client.auth.currentUser?.id ? 'user' : 'model',
+        senderId: m['sender_id']?.toString() ?? '',
+        senderName: m['sender_name']?.toString() ?? 'User',
+        text: m['text']?.toString() ?? '',
+        timestamp: m['timestamp'] as int,
+        section: m['section']?.toString() ?? '',
+      )).toList();
+
+      await localDb.insertMessages(messages);
+      debugPrint("Background Sync: ${messages.length} messages synced.");
+    }
+  } catch (e) {
+    debugPrint("Background Message Sync Error: $e");
+  }
 }
 
 Future<void> _checkNewUpdates() async {
@@ -65,6 +100,16 @@ class BackgroundService {
       "1",
       checkUpdatesTask,
       frequency: const Duration(minutes: 15),
+      constraints: Constraints(
+        networkType: NetworkType.connected,
+      ),
+    );
+  }
+
+  static Future<void> registerOneOffTask() async {
+    await Workmanager().registerOneOffTask(
+      "2",
+      checkUpdatesTask,
       constraints: Constraints(
         networkType: NetworkType.connected,
       ),

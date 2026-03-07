@@ -7,10 +7,33 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../models/models.dart';
 import 'supabase_service.dart';
+import 'local_database_service.dart';
+import 'package:flutter/foundation.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
+  
+  // 1. Silent sync: Save message to local database before showing notification
+  if (message.data['type'] == 'chat' || message.data['type'] == 'message') {
+    try {
+      final localDb = LocalDatabaseService();
+      final msg = ChatMessage(
+        id: message.data['id'] ?? message.messageId ?? DateTime.now().millisecondsSinceEpoch.toString(),
+        role: 'model', // Typically identifying incoming messages
+        senderId: message.data['senderId'] ?? '',
+        senderName: message.data['senderName'] ?? 'FidelShare User',
+        text: message.data['body'] ?? message.notification?.body ?? '',
+        timestamp: int.tryParse(message.data['timestamp']?.toString() ?? '') ?? DateTime.now().millisecondsSinceEpoch,
+        section: message.data['section'] ?? 'general',
+      );
+      await localDb.insertMessage(msg);
+    } catch (e) {
+      debugPrint("Background Data Sync Error: $e");
+    }
+  }
+
+  // 2. Show the notification alert
   await _showBackgroundNotification(message);
 }
 
@@ -34,7 +57,17 @@ Future<void> _showBackgroundNotification(RemoteMessage message) async {
       .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
       ?.createNotificationChannel(channel);
 
-  final title = message.notification?.title ?? message.data['title']?.toString() ?? 'Update';
+  // Telegram-style: Use sender name as title if available
+  final senderName = message.data['senderName']?.toString();
+  final type = message.data['type']?.toString();
+  
+  String title = message.notification?.title ?? message.data['title']?.toString() ?? 'FidelShare';
+  if (type == 'chat' || type == 'message') {
+    if (senderName != null) {
+      title = senderName;
+    }
+  }
+
   final body = message.notification?.body ?? message.data['body']?.toString() ?? '';
 
   const details = NotificationDetails(
@@ -65,11 +98,14 @@ class NotificationService {
 
   static Stream<AppNotification> get notifications => _controller.stream;
 
-  static Future<void> initialize() async {
+  static Future<void> initialize({bool isBackground = false}) async {
     if (_initialized) return;
     await Firebase.initializeApp();
     await _initLocalNotifications();
-    await _requestPermissions();
+    
+    if (!isBackground) {
+      await _requestPermissions();
+    }
 
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
     FirebaseMessaging.onMessage.listen((message) {
