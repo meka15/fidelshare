@@ -48,3 +48,7 @@ assets/.env
 *.env
 google-services.json
 GoogleService-Info.plist
+
+"files.exclude": {
+  ".env": false
+}

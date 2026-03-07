@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/models.dart';
 import '../services/supabase_service.dart';
+import '../services/notification_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   final Student student;
@@ -155,6 +156,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
             'Notify when PDFs are added', 
             widget.settings.notifications.newMaterials,
             (v) => _updateNotify(materials: v)
+          ),
+          _buildActionTile(
+            'Send Test Alert', 
+            'Triggers a local notification now', 
+            Icons.notification_important_outlined,
+            () => NotificationService.showLocalNotification(
+              title: 'Test Notification', 
+              body: 'If you see this, your alert system is working!'
+            ),
           ),
 
           _buildSectionHeader('Security'),

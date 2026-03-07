@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../models/models.dart';
@@ -16,11 +17,19 @@ class LocalDatabaseService {
   }
 
   Future<Database> _initDatabase() async {
-    String path = join(await getDatabasesPath(), 'fidelshare_chat.db');
+    String path = join(await getDatabasesPath(), 'fidelshare_chat_v3.db');
     return await openDatabase(
       path,
-      version: 1,
+      version: 3,
       onCreate: _onCreate,
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute('ALTER TABLE chat_messages ADD COLUMN is_edited INTEGER DEFAULT 0');
+        }
+        if (oldVersion < 3) {
+          await db.execute('ALTER TABLE chat_messages ADD COLUMN seen_by TEXT DEFAULT "[]"');
+        }
+      },
     );
   }
 
@@ -33,7 +42,9 @@ class LocalDatabaseService {
         sender_name TEXT,
         text TEXT,
         timestamp INTEGER,
-        section TEXT
+        section TEXT,
+        is_edited INTEGER DEFAULT 0,
+        seen_by TEXT DEFAULT "[]"
       )
     ''');
     
@@ -57,6 +68,8 @@ class LocalDatabaseService {
           'text': msg.text,
           'timestamp': msg.timestamp,
           'section': msg.section,
+          'is_edited': msg.isEdited ? 1 : 0,
+          'seen_by': jsonEncode(msg.seenBy),
         },
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
@@ -76,6 +89,8 @@ class LocalDatabaseService {
         'text': msg.text,
         'timestamp': msg.timestamp,
         'section': msg.section,
+        'is_edited': msg.isEdited ? 1 : 0,
+        'seen_by': jsonEncode(msg.seenBy),
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
@@ -107,6 +122,11 @@ class LocalDatabaseService {
       text: m['text']?.toString() ?? '',
       timestamp: m['timestamp'] as int,
       section: m['section']?.toString() ?? '',
+      isEdited: (m['is_edited'] as int? ?? 0) == 1,
+      seenBy: m['seen_by'] != null 
+          ? List<Map<String, String>>.from(
+              (jsonDecode(m['seen_by']) as List).map((e) => Map<String, String>.from(e)))
+          : [],
     )).toList();
   }
 
@@ -124,5 +144,37 @@ class LocalDatabaseService {
       return result.first['timestamp'] as int?;
     }
     return null;
+  }
+
+  Future<void> deleteMessage(String id) async {
+    final db = await database;
+    await db.delete(
+      'chat_messages',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> updateMessage(String id, String newText) async {
+    final db = await database;
+    await db.update(
+      'chat_messages',
+      {
+        'text': newText,
+        'is_edited': 1,
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> updateMessageReceipts(String id, List<Map<String, String>> seenBy) async {
+    final db = await database;
+    await db.update(
+      'chat_messages',
+      {'seen_by': jsonEncode(seenBy)},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 }

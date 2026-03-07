@@ -8,13 +8,24 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../models/models.dart';
 import 'supabase_service.dart';
 import 'local_database_service.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter/material.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
   
-  // 1. Silent sync: Save message to local database before showing notification
+  try {
+    await dotenv.load(fileName: "assets/.env");
+    debugPrint("Firebase Background Handler: Env loaded, Supabase key present: ${dotenv.get('SUPABASE_ANON_KEY').isNotEmpty}");
+  } catch (_) {
+  }
+  
+  // Initialize Supabase if needed for background sync
+  try {
+    await SupabaseService.initialize();
+  } catch (_) {}
   if (message.data['type'] == 'chat' || message.data['type'] == 'message') {
     try {
       final localDb = LocalDatabaseService();
@@ -41,15 +52,17 @@ Future<void> _showBackgroundNotification(RemoteMessage message) async {
   final plugin = FlutterLocalNotificationsPlugin();
   const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
   const darwinSettings = DarwinInitializationSettings();
+  const linuxSettings = LinuxInitializationSettings(defaultActionName: 'Open');
   await plugin.initialize(const InitializationSettings(
     android: androidSettings,
     iOS: darwinSettings,
+    linux: linuxSettings,
   ));
 
   const channel = AndroidNotificationChannel(
-    'updates',
-    'Updates',
-    description: 'Updates and messages',
+    'fidel_alerts_v1',
+    'FidelShare Alerts',
+    description: 'Important updates and messages',
     importance: Importance.max,
   );
 
@@ -72,9 +85,9 @@ Future<void> _showBackgroundNotification(RemoteMessage message) async {
 
   const details = NotificationDetails(
     android: AndroidNotificationDetails(
-      'updates',
-      'Updates',
-      channelDescription: 'Updates and messages',
+      'fidel_alerts_v1',
+      'FidelShare Alerts',
+      channelDescription: 'Important updates and messages',
       importance: Importance.max,
       priority: Priority.high,
     ),
@@ -100,31 +113,52 @@ class NotificationService {
 
   static Future<void> initialize({bool isBackground = false}) async {
     if (_initialized) return;
-    await Firebase.initializeApp();
-    await _initLocalNotifications();
     
-    if (!isBackground) {
-      await _requestPermissions();
+    // 1. Always init local notifications (doesn't need internet/Firebase)
+    try {
+      await _initLocalNotifications();
+    } catch (e) {
+      debugPrint("Local Notification Init Error: $e");
+    }
+    
+    // 2. Init Firebase (Needs internet for first run, or stored config)
+    try {
+      await Firebase.initializeApp();
+      
+      if (!isBackground) {
+        await _requestPermissions();
+
+        try {
+          final token = await FirebaseMessaging.instance.getToken();
+          debugPrint('FCM Token (this device): $token');
+        } catch (e) {
+          debugPrint('FCM Token Error: $e');
+        }
+      }
+
+      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+      FirebaseMessaging.onMessage.listen((message) {
+        _handleMessage(message, showLocal: true);
+      });
+      FirebaseMessaging.onMessageOpenedApp.listen((message) {
+        _handleMessage(message, showLocal: false);
+      });
+
+      final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
+      if (initialMessage != null) {
+        _handleMessage(initialMessage, showLocal: false);
+      }
+    } catch (e) {
+      debugPrint("Firebase Messaging Init Error: $e");
+      // Keep going, at least local notifications will work
     }
 
-    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-    FirebaseMessaging.onMessage.listen((message) {
-      _handleMessage(message, showLocal: true);
-    });
-    FirebaseMessaging.onMessageOpenedApp.listen((message) {
-      _handleMessage(message, showLocal: false);
-    });
-
-    final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
-    if (initialMessage != null) {
-      _handleMessage(initialMessage, showLocal: false);
-    }
-
+    debugPrint("Notification Service: Initialization complete. Firebase active: ${!isBackground}");
     _initialized = true;
   }
 
   static Future<void> _requestPermissions() async {
-    await FirebaseMessaging.instance.requestPermission(
+    final settings = await FirebaseMessaging.instance.requestPermission(
       alert: true,
       announcement: false,
       badge: true,
@@ -133,6 +167,7 @@ class NotificationService {
       provisional: false,
       sound: true,
     );
+    debugPrint("Firebase Messaging Permission Status: ${settings.authorizationStatus}");
 
     if (Platform.isAndroid) {
       await _local
@@ -144,16 +179,20 @@ class NotificationService {
   static Future<void> _initLocalNotifications() async {
     const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
     const darwinSettings = DarwinInitializationSettings();
+    const linuxSettings = LinuxInitializationSettings(defaultActionName: 'Open');
     await _local.initialize(const InitializationSettings(
       android: androidSettings,
       iOS: darwinSettings,
+      linux: linuxSettings,
     ));
 
     const channel = AndroidNotificationChannel(
-      'updates',
-      'Updates',
-      description: 'Updates and messages',
+      'fidel_alerts_v1',
+      'FidelShare Alerts',
+      description: 'Important updates and messages',
       importance: Importance.max,
+      playSound: true,
+      enableVibration: true,
     );
 
     await _local
@@ -183,23 +222,37 @@ class NotificationService {
   }
 
   static Future<void> showLocalNotification({required String title, required String body}) async {
-    const details = NotificationDetails(
-      android: AndroidNotificationDetails(
-        'updates',
-        'Updates',
-        channelDescription: 'Updates and messages',
+    try {
+      debugPrint("Showing Local Notification: $title - $body");
+      
+      const androidDetails = AndroidNotificationDetails(
+        'fidel_alerts_v1',
+        'FidelShare Alerts',
+        channelDescription: 'Important updates and messages',
         importance: Importance.max,
         priority: Priority.high,
-      ),
-      iOS: DarwinNotificationDetails(),
-    );
+        ticker: 'ticker',
+        showWhen: true,
+        category: AndroidNotificationCategory.message,
+      );
 
-    await _local.show(
-      DateTime.now().millisecondsSinceEpoch ~/ 1000,
-      title,
-      body,
-      details,
-    );
+      const details = NotificationDetails(
+        android: androidDetails,
+        iOS: DarwinNotificationDetails(),
+        linux: LinuxNotificationDetails(
+          defaultActionName: 'Open',
+        ),
+      );
+
+      await _local.show(
+        DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        title,
+        body,
+        details,
+      );
+    } catch (e) {
+      debugPrint("Error showing local notification: $e");
+    }
   }
 
   static void notifySimple({

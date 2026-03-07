@@ -27,7 +27,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _hasMoreOlderMessages = true;
   String _connectionStatus = 'connecting';
   List<ChatMessage> _messages = [];
-  int? _sectionId;
+  String? _sectionId;
   RealtimeChannel? _channel;
 
   // SaaS Light Colors
@@ -134,47 +134,131 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildBubble(ChatMessage msg, bool isMe, bool showName) {
+    final statusColor = (isMe ? Colors.white70 : _textGray).withOpacity(0.5);
+    
     return Padding(
-      padding: EdgeInsets.only(top: showName ? 12 : 2),
-      child: Row(
-        mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          if (!isMe && showName) ...[
-            _buildAvatar(msg.senderName, size: 32),
-            const SizedBox(width: 8),
-          ] else if (!isMe && !showName) ...[
-            const SizedBox(width: 40), // Offset for consecutive messages
-          ],
-          Flexible(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: isMe ? _primaryBlue : _bgLight,
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(16),
-                  topRight: const Radius.circular(16),
-                  bottomLeft: Radius.circular(isMe ? 16 : 4),
-                  bottomRight: Radius.circular(isMe ? 4 : 16),
+      padding: EdgeInsets.only(top: showName ? 16 : 2, bottom: 2),
+      child: GestureDetector(
+        onTap: () => _showDetails(msg),
+        onLongPress: () => _showOptions(msg),
+        child: Row(
+          mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            if (!isMe && showName) ...[
+              Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(color: _primaryBlue.withOpacity(0.2), blurRadius: 8, offset: const Offset(0, 2))
+                  ],
+                ),
+                child: _buildAvatar(msg.senderName, size: 34),
+              ),
+              const SizedBox(width: 8),
+            ] else if (!isMe && !showName) ...[
+              const SizedBox(width: 42),
+            ],
+            Flexible(
+              child: Container(
+                constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+                padding: const EdgeInsets.only(left: 12, right: 12, top: 8, bottom: 6),
+                decoration: BoxDecoration(
+                  gradient: isMe
+                      ? LinearGradient(
+                          colors: [_primaryBlue, _primaryBlue.withBlue(230)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        )
+                      : null,
+                  color: isMe ? null : Colors.white,
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(18),
+                    topRight: const Radius.circular(18),
+                    bottomLeft: Radius.circular(isMe ? 18 : 4),
+                    bottomRight: Radius.circular(isMe ? 4 : 18),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: isMe ? _primaryBlue.withOpacity(0.2) : Colors.black.withOpacity(0.05),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (showName && !isMe)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4, left: 2),
+                        child: Text(
+                          msg.senderName,
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: _primaryBlue.withOpacity(0.9),
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                      ),
+                    Stack(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 14, right: 4),
+                          child: Text(
+                            msg.text,
+                            style: GoogleFonts.inter(
+                              color: isMe ? Colors.white : _textDark,
+                              fontSize: 15,
+                              height: 1.4,
+                              fontWeight: FontWeight.w400,
+                              letterSpacing: -0.1,
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          bottom: 0,
+                          right: 0,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (msg.isEdited)
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 3, bottom: 1),
+                                  child: Icon(Icons.edit_rounded, size: 10, color: statusColor),
+                                ),
+                              Text(
+                                DateFormat('h:mm a').format(DateTime.fromMillisecondsSinceEpoch(msg.timestamp)),
+                                style: GoogleFonts.inter(
+                                  fontSize: 10,
+                                  color: statusColor,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              if (isMe) ...[
+                                const SizedBox(width: 4),
+                                Icon(
+                                  msg.seenBy.isEmpty ? Icons.done : Icons.done_all,
+                                  size: 13,
+                                  color: msg.seenBy.isEmpty 
+                                    ? statusColor 
+                                    : Colors.cyanAccent.withOpacity(0.9),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (showName && !isMe)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Text(msg.senderName, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: _primaryBlue)),
-                    ),
-                  Text(
-                    msg.text,
-                    style: TextStyle(color: isMe ? Colors.white : _textDark, fontSize: 14, height: 1.4),
-                  ),
-                ],
-              ),
             ),
-          ),
-        ],
+            if (isMe) const SizedBox(width: 8),
+          ],
+        ),
       ),
     );
   }
@@ -307,7 +391,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   // --- DATA LOGIC ---
-
+  
   Future<void> _initChat() async {
     await _loadSectionId();
     if (_sectionId != null) {
@@ -320,25 +404,28 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _loadSectionId() async {
     final data = await SupabaseService.client.from('profiles').select('section').eq('id', widget.userId).maybeSingle();
     if (data != null && data['section'] != null) {
-      setState(() => _sectionId = int.tryParse(data['section'].toString()));
+      setState(() => _sectionId = data['section'].toString());
     }
   }
 
   Future<void> _loadLocalMessages() async {
-    final localMsgs = await _localDb.getMessages(_sectionId.toString(), limit: 20);
+    if (_sectionId == null) return;
+    final localMsgs = await _localDb.getMessages(_sectionId!, limit: 20);
     setState(() {
       _messages = localMsgs.reversed.toList();
     });
     // Scroll to bottom only initially
     if (_messages.isNotEmpty) {
       _scrollToBottom();
+      // Bulk mark as seen (only messages where I'm not in seenBy)
+      _markVisibleMessagesAsSeen();
     }
   }
 
   Future<void> _syncNewMessages() async {
     if (_connectionStatus == 'offline' || _sectionId == null) return;
 
-    int? latestTimestamp = await _localDb.getLatestTimestamp(_sectionId.toString());
+    int? latestTimestamp = await _localDb.getLatestTimestamp(_sectionId!);
     
     SupabaseQueryBuilder query = SupabaseService.client.from('chat_messages');
     PostgrestFilterBuilder filter = query.select().eq('section', _sectionId!);
@@ -361,6 +448,10 @@ class _ChatScreenState extends State<ChatScreen> {
         text: m['text'] ?? '',
         timestamp: (m['timestamp'] as num).toInt(),
         section: m['section']?.toString() ?? '',
+        isEdited: m['is_edited'] == true,
+        seenBy: m['seen_by'] != null 
+            ? List<Map<String, String>>.from((m['seen_by'] as List).map((e) => Map<String, String>.from(e)))
+            : [],
       )).toList();
       
       await _localDb.insertMessages(newMessages);
@@ -369,6 +460,7 @@ class _ChatScreenState extends State<ChatScreen> {
         for (var msg in newMessages) {
           if (!_messages.any((e) => e.id == msg.id)) {
             _messages.add(msg);
+            _markAsSeen(msg);
           }
         }
         _messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
@@ -432,6 +524,9 @@ class _ChatScreenState extends State<ChatScreen> {
             }
           }
           _messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+          for (var msg in olderMessages) {
+            _markAsSeen(msg);
+          }
         });
         
         // Wait for frame to calculate new extent and maintain scroll position
@@ -451,34 +546,79 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _subscribeRealtime() {
     _channel = SupabaseService.client.channel('chat_$_sectionId').onPostgresChanges(
-      event: PostgresChangeEvent.insert,
+      event: PostgresChangeEvent.all,
       schema: 'public',
       table: 'chat_messages',
       filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'section', value: _sectionId!),
       callback: (payload) {
-        final m = payload.newRecord;
-        final msg = ChatMessage(
-          id: m['id'].toString(),
-          role: m['role'] ?? 'user',
-          senderId: m['sender_id'] ?? '',
-          senderName: m['sender_name'] ?? 'Unknown',
-          text: m['text'] ?? '',
-          timestamp: (m['timestamp'] as num).toInt(),
-          section: m['section']?.toString() ?? '',
-        );
-        
-        _localDb.insertMessage(msg);
+        debugPrint("Chat Realtime Event: ${payload.eventType}");
+        if (payload.eventType == PostgresChangeEvent.insert) {
+          final m = payload.newRecord;
+          debugPrint("New Message Received: ${m['id']}");
+          final msg = ChatMessage(
+            id: m['id'].toString(),
+            role: m['role'] ?? 'user',
+            senderId: m['sender_id'] ?? '',
+            senderName: m['sender_name'] ?? 'Unknown',
+            text: m['text'] ?? '',
+            timestamp: (m['timestamp'] as num).toInt(),
+            section: m['section']?.toString() ?? '',
+            isEdited: m['is_edited'] == true,
+            seenBy: m['seen_by'] != null 
+                ? List<Map<String, String>>.from((m['seen_by'] as List).map((e) => Map<String, String>.from(e)))
+                : [],
+          );
+          
+          _localDb.insertMessage(msg);
 
-        setState(() { 
-          if (!_messages.any((e) => e.id == msg.id)) {
-            _messages.add(msg); 
-          }
-        });
-        _scrollToBottom();
+          setState(() { 
+            if (!_messages.any((e) => e.id == msg.id)) {
+              _messages.add(msg); 
+              _messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+            }
+          });
+          _scrollToBottom();
+          _markAsSeen(msg);
+        } else if (payload.eventType == PostgresChangeEvent.update) {
+          final m = payload.newRecord;
+          final id = m['id'].toString();
+          final text = m['text']?.toString();
+          final isEdited = m['is_edited'] == true;
+          final timestamp = (m['timestamp'] as num?)?.toInt();
+          final seenBy = m['seen_by'] != null 
+              ? List<Map<String, String>>.from((m['seen_by'] as List).map((e) => Map<String, String>.from(e)))
+              : <Map<String, String>>[];
+          
+          if (text != null) _localDb.updateMessage(id, text);
+          _localDb.updateMessageReceipts(id, seenBy);
+          
+          setState(() {
+            final idx = _messages.indexWhere((e) => e.id == id);
+            if (idx != -1) {
+              _messages[idx] = ChatMessage(
+                id: _messages[idx].id,
+                role: _messages[idx].role,
+                senderId: _messages[idx].senderId,
+                senderName: _messages[idx].senderName,
+                text: text ?? _messages[idx].text,
+                timestamp: timestamp ?? _messages[idx].timestamp,
+                section: _messages[idx].section,
+                isEdited: isEdited,
+                seenBy: seenBy,
+              );
+              _messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+            }
+          });
+        } else if (payload.eventType == PostgresChangeEvent.delete) {
+          final id = payload.oldRecord['id'].toString();
+          debugPrint("Message Deleted Realtime: $id");
+          _localDb.deleteMessage(id);
+          setState(() {
+            _messages.removeWhere((e) => e.id == id);
+          });
+        }
       },
-    ).subscribe((status, [_]) {
-      // status could be used to update connection UI, but we already use connectivity_plus
-    });
+    ).subscribe();
   }
 
   Future<void> _sendMessage() async {
@@ -500,8 +640,270 @@ class _ChatScreenState extends State<ChatScreen> {
         'timestamp': DateTime.now().millisecondsSinceEpoch,
         'section': _sectionId!,
       });
+
+      // Send push notifications server-side (so secrets are not shipped in the app)
+      try {
+        final sectionId = _sectionId!;
+        await SupabaseService.client.functions.invoke(
+          'send_push',
+          body: {
+            'type': 'chat',
+            'section': sectionId,
+            'exclude_user_id': widget.userId,
+            'title': widget.student.name,
+            'body': text,
+            'data': {
+              'senderId': widget.userId,
+              'senderName': widget.student.name,
+              'section': sectionId,
+              'timestamp': DateTime.now().millisecondsSinceEpoch.toString(),
+            },
+          },
+        );
+      } catch (e) {
+        debugPrint('send_push invoke error: $e');
+      }
     } finally {
       setState(() => _isSending = false);
+    }
+  }
+
+  void _showOptions(ChatMessage msg) {
+    final isMe = msg.senderId == widget.userId;
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('Message Details'),
+              onTap: () {
+                Navigator.pop(context);
+                _showDetails(msg);
+              },
+            ),
+            if (isMe) ...[
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Edit Message'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _editMessage(msg);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Colors.red),
+                title: const Text('Delete Message', style: TextStyle(color: Colors.red)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _deleteMessage(msg.id);
+                },
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showDetails(ChatMessage msg) {
+    final date = DateTime.fromMillisecondsSinceEpoch(msg.timestamp);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Message Details'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Sender: ${msg.senderName}', style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Text('Sent: ${DateFormat('MMM d, h:mm a').format(date)}'),
+              if (msg.isEdited) ...[
+                const SizedBox(height: 8),
+                const Text('Status: Edited', style: TextStyle(fontStyle: FontStyle.italic, fontSize: 12, color: Colors.blue)),
+              ],
+              const SizedBox(height: 16),
+              Text('Message:', style: TextStyle(color: _textGray, fontSize: 12)),
+              const SizedBox(height: 4),
+              Text(msg.text),
+              const SizedBox(height: 20),
+              const Divider(),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(Icons.remove_red_eye_outlined, size: 16, color: Colors.blue),
+                  const SizedBox(width: 8),
+                  Text('Seen By (${msg.seenBy.length})', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                ],
+              ),
+              const SizedBox(height: 8),
+              if (msg.seenBy.isEmpty)
+                Text('No one has seen this yet', style: TextStyle(color: _textGray, fontSize: 12, fontStyle: FontStyle.italic))
+              else
+                ...msg.seenBy.map((user) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      _buildAvatar(user['name'] ?? '?', size: 24),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          user['name'] ?? 'Unknown',
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ),
+                    ],
+                  ),
+                )),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _markVisibleMessagesAsSeen() async {
+    if (_connectionStatus == 'offline' || _messages.isEmpty) return;
+    
+    // Only target messages I haven't seen yet and I didn't send
+    final unseen = _messages.where((m) => 
+      m.senderId != widget.userId && 
+      !m.seenBy.any((u) => u['id'] == widget.userId)
+    ).toList();
+
+    for (var msg in unseen) {
+      await _markAsSeen(msg);
+    }
+  }
+
+  Future<void> _markAsSeen(ChatMessage msg) async {
+    if (msg.senderId == widget.userId || _connectionStatus == 'offline') return;
+    
+    final alreadySeen = msg.seenBy.any((u) => u['id'] == widget.userId);
+    if (!alreadySeen) {
+      try {
+        final newSeenBy = List<Map<String, String>>.from(msg.seenBy);
+        newSeenBy.add({'id': widget.userId, 'name': widget.student.name});
+        
+        await SupabaseService.client
+            .from('chat_messages')
+            .update({'seen_by': newSeenBy})
+            .eq('id', msg.id);
+            
+        _localDb.updateMessageReceipts(msg.id, newSeenBy);
+      } catch (e) {
+        debugPrint("Error marking as seen: $e");
+      }
+    }
+  }
+
+  Future<void> _editMessage(ChatMessage msg) async {
+    final editController = TextEditingController(text: msg.text);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Edit Message'),
+        content: TextField(
+          controller: editController,
+          autofocus: true,
+          maxLines: null,
+          decoration: const InputDecoration(hintText: 'Modify message...'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              final newText = editController.text.trim();
+              if (newText.isNotEmpty && newText != msg.text) {
+                Navigator.pop(context);
+                try {
+                  final response = await SupabaseService.client
+                      .from('chat_messages')
+                      .update({
+                        'text': newText,
+                        'is_edited': true,
+                        'timestamp': DateTime.now().millisecondsSinceEpoch,
+                      })
+                      .eq('id', msg.id)
+                      .select();
+
+                  if (response.isEmpty) {
+                    throw 'No message was updated. This usually means you do not have permission to edit this message (Row Level Security) or the message ID is invalid.';
+                  }
+                  debugPrint("Chat Message Updated: ${msg.id}");
+                } catch (e) {
+                  debugPrint("CRITICAL ERROR editing message: $e");
+                  if (context.mounted) {
+                    showDialog(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Edit Failed'),
+                        content: Text('Reason: $e\n\nTips: Check if Row Level Security (RLS) is enabled in Supabase and allows UPDATES for your user.'),
+                        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
+                      ),
+                    );
+                  }
+                }
+              } else {
+                Navigator.pop(context);
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteMessage(String id) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Message?'),
+        content: const Text('This action cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        final response = await SupabaseService.client
+            .from('chat_messages')
+            .delete()
+            .eq('id', id)
+            .select();
+
+        if (response.isEmpty) {
+          throw 'No message was deleted. This usually means you do not have permission to delete this message or it was already deleted.';
+        }
+        debugPrint("Chat Message Deleted: $id");
+      } catch (e) {
+        debugPrint("CRITICAL ERROR deleting message: $e");
+        if (mounted) {
+          showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Delete Failed'),
+              content: Text('Reason: $e\n\nCheck your Supabase RLS policies for the "delete" operation.'),
+              actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
+            ),
+          );
+        }
+      }
     }
   }
 

@@ -1,14 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'services/supabase_service.dart';
 import 'services/notification_service.dart';
 import 'services/background_service.dart';
 import 'screens/app_root.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'dart:io';
 
 void main() async {
   // 1. Ensure Flutter is ready
   WidgetsFlutterBinding.ensureInitialized();
+
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+  
+  if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  }
   
   // Load environment variables
   try {
@@ -17,8 +27,8 @@ void main() async {
     debugPrint("DotEnv Init Error: $e");
   }
 
-  // Avoid runtime font downloads (prevents crashes when offline)
-  GoogleFonts.config.allowRuntimeFetching = false;
+  // Allow font downloads if not in assets (ensures app doesn't crash)
+  GoogleFonts.config.allowRuntimeFetching = true;
 
   // 2. Initialize Supabase (Your primary backend)
   try {

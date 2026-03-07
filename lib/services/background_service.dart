@@ -4,12 +4,22 @@ import 'supabase_service.dart';
 import 'notification_service.dart';
 import 'local_database_service.dart';
 import '../models/models.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 @pragma('vm:entry-point')
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
+    // 0. Ensure Flutter binding is ready
+    WidgetsFlutterBinding.ensureInitialized();
+    
     try {
+      // 1. Important: Background isolates need their own dotenv initialization
+      await dotenv.load(fileName: "assets/.env");
+      
+      final url = SupabaseService.supabaseUrl;
+      debugPrint("Background Task: Initializing Supabase with URL: $url");
+      
       await SupabaseService.initialize();
       await NotificationService.initialize(isBackground: true);
 

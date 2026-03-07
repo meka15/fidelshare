@@ -254,6 +254,8 @@ class ChatMessage {
   final String text;
   final int timestamp;
   final String section;
+  final bool isEdited;
+  final List<Map<String, String>> seenBy;
 
   ChatMessage({
     required this.id,
@@ -263,6 +265,8 @@ class ChatMessage {
     required this.text,
     required this.timestamp,
     required this.section,
+    this.isEdited = false,
+    this.seenBy = const [],
   });
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
@@ -274,6 +278,11 @@ class ChatMessage {
       text: json['text'],
       timestamp: json['timestamp'],
       section: json['section'],
+      isEdited: json['isEdited'] ?? false,
+      seenBy: json['seenBy'] != null 
+          ? List<Map<String, String>>.from(
+              (json['seenBy'] as List).map((e) => Map<String, String>.from(e)))
+          : [],
     );
   }
 
@@ -286,6 +295,8 @@ class ChatMessage {
       'text': text,
       'timestamp': timestamp,
       'section': section,
+      'isEdited': isEdited,
+      'seenBy': seenBy,
     };
   }
 }

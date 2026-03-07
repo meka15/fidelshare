@@ -35,7 +35,7 @@ class _AppRootState extends State<AppRoot> {
   bool _hasSyncedOnce = false;
   StreamSubscription<AppNotification>? _notifSub;
   RealtimeChannel? _chatChannel;
-  int? _chatSectionId;
+  String? _chatSectionId;
   RealtimeChannel? _announcementsChannel;
   RealtimeChannel? _materialsChannel;
   RealtimeChannel? _classesChannel;
@@ -64,6 +64,7 @@ class _AppRootState extends State<AppRoot> {
     _stopRealtimeChannels();
     final client = SupabaseService.client;
     final sectionValue = section.toString();
+    debugPrint("Starting Realtime Channels for Section: '$sectionValue'");
 
     _announcementsChannel = client.channel('realtime-announcements-$sectionValue')
       ..onPostgresChanges(
@@ -104,7 +105,9 @@ class _AppRootState extends State<AppRoot> {
           });
         },
       )
-      ..subscribe();
+      ..subscribe((status, [error]) {
+        debugPrint("Realtime Subscription Status (Announcements): $status ${error ?? ''}");
+      });
 
     _materialsChannel = client.channel('realtime-materials-$sectionValue')
       ..onPostgresChanges(
@@ -117,17 +120,16 @@ class _AppRootState extends State<AppRoot> {
           value: sectionValue,
         ),
         callback: (payload) {
+          debugPrint("Materials Realtime Event Triggered: ${payload.eventType}");
           final material = _materialFromRecord(payload.newRecord);
           if (material == null) return;
           _upsertMaterial(material);
-          if (_settings.notifications.newMaterials) {
-            NotificationService.notifySimple(
-              title: 'New material',
-              body: material.name.isNotEmpty ? material.name : 'New material added.',
-              type: 'material',
-              showLocal: true,
-            );
-          }
+          NotificationService.notifySimple(
+            title: 'New material',
+            body: material.name.isNotEmpty ? material.name : 'New material added.',
+            type: 'material',
+            showLocal: true,
+          );
         },
       )
       ..onPostgresChanges(
@@ -147,7 +149,9 @@ class _AppRootState extends State<AppRoot> {
           });
         },
       )
-      ..subscribe();
+      ..subscribe((status, [error]) {
+        debugPrint("Realtime Subscription Status (Materials): $status ${error ?? ''}");
+      });
 
     _classesChannel = client.channel('realtime-classes-$sectionValue')
       ..onPostgresChanges(
@@ -160,17 +164,16 @@ class _AppRootState extends State<AppRoot> {
           value: sectionValue,
         ),
         callback: (payload) {
+          debugPrint("Schedule Realtime Insert Event Triggered");
           final session = _classFromRecord(payload.newRecord);
           if (session == null) return;
           _upsertClass(session);
-          if (_settings.notifications.upcomingClasses) {
-            NotificationService.notifySimple(
-              title: 'Schedule update',
-              body: session.name.isNotEmpty ? session.name : 'Class schedule changed.',
-              type: 'schedule',
-              showLocal: true,
-            );
-          }
+          NotificationService.notifySimple(
+            title: 'Schedule update',
+            body: session.name.isNotEmpty ? session.name : 'Class schedule changed.',
+            type: 'schedule',
+            showLocal: true,
+          );
         },
       )
       ..onPostgresChanges(
@@ -183,17 +186,16 @@ class _AppRootState extends State<AppRoot> {
           value: sectionValue,
         ),
         callback: (payload) {
+          debugPrint("Schedule Realtime Update Event Triggered");
           final session = _classFromRecord(payload.newRecord);
           if (session == null) return;
           _upsertClass(session);
-          if (_settings.notifications.upcomingClasses) {
-            NotificationService.notifySimple(
-              title: 'Schedule update',
-              body: session.name.isNotEmpty ? session.name : 'Class schedule changed.',
-              type: 'schedule',
-              showLocal: true,
-            );
-          }
+          NotificationService.notifySimple(
+            title: 'Schedule update',
+            body: session.name.isNotEmpty ? session.name : 'Class schedule changed.',
+            type: 'schedule',
+            showLocal: true,
+          );
         },
       )
       ..onPostgresChanges(
@@ -206,6 +208,7 @@ class _AppRootState extends State<AppRoot> {
           value: sectionValue,
         ),
         callback: (payload) {
+          debugPrint("Schedule Realtime Delete Event Triggered");
           final id = payload.oldRecord['id']?.toString();
           if (id == null) return;
           setState(() {
@@ -213,7 +216,9 @@ class _AppRootState extends State<AppRoot> {
           });
         },
       )
-      ..subscribe();
+      ..subscribe((status, [error]) {
+        debugPrint("Realtime Subscription Status (Classes): $status ${error ?? ''}");
+      });
   }
 
   void _stopRealtimeChannels() {
@@ -311,7 +316,7 @@ class _AppRootState extends State<AppRoot> {
     });
   }
 
-  Future<int?> _fetchChatSectionId(String userId) async {
+  Future<String?> _fetchChatSectionId(String userId) async {
     try {
       final client = SupabaseService.client;
       final data = await client
@@ -321,10 +326,7 @@ class _AppRootState extends State<AppRoot> {
           .maybeSingle();
 
       if (data != null && data['section'] != null) {
-        final raw = data['section'];
-        if (raw is int) return raw;
-        if (raw is num) return raw.toInt();
-        return int.tryParse(raw.toString());
+        return data['section'].toString();
       }
     } catch (_) {
       // ignore
@@ -344,6 +346,8 @@ class _AppRootState extends State<AppRoot> {
     final channel = client.channel('realtime-chat-notif-$sectionId');
     _chatChannel = channel;
 
+    debugPrint("Starting Chat Realtime for Section: '$sectionId'");
+
     channel.onPostgresChanges(
       event: PostgresChangeEvent.insert,
       schema: 'public',
@@ -351,9 +355,10 @@ class _AppRootState extends State<AppRoot> {
       filter: PostgresChangeFilter(
         type: PostgresChangeFilterType.eq,
         column: 'section',
-        value: sectionId.toString(),
+        value: sectionId,
       ),
       callback: (payload) {
+        debugPrint("Chat Realtime Insert Event Triggered");
         final m = payload.newRecord;
         final senderId = m['sender_id']?.toString();
         if (senderId == userId) return;
@@ -367,7 +372,9 @@ class _AppRootState extends State<AppRoot> {
           showLocal: true,
         );
       },
-    ).subscribe();
+    ).subscribe((status, [error]) {
+      debugPrint("Realtime Subscription Status (Chat): $status ${error ?? ''}");
+    });
   }
 
   void _stopChatRealtime() {
