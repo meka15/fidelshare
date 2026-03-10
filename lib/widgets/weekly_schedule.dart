@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
+import '../utils/time_utils.dart';
 
 class WeeklySchedule extends StatefulWidget {
   final List<ClassSession> classes;
@@ -170,7 +171,15 @@ class _WeeklyScheduleState extends State<WeeklySchedule> {
                 borderRadius: const BorderRadius.horizontal(left: Radius.circular(16)),
               ),
               child: Center(
-                child: Text(c.time, style: TextStyle(fontWeight: FontWeight.bold, color: isCancelled ? Colors.grey : colorScheme.primary)),
+                child: Text(
+                  EthiopianTimeUtils.formatString(c.time),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: isCancelled ? Colors.grey : colorScheme.primary,
+                  ),
+                ),
               ),
             ),
             Expanded(

@@ -14,18 +14,34 @@ import 'package:flutter/material.dart';
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+  
+  try {
+    await Firebase.initializeApp();
+    debugPrint("Firebase Background Handler: Firebase initialized OK");
+  } catch (e) {
+    debugPrint("Firebase Background Handler: Firebase init FAILED: $e");
+    // If Firebase fails to init, we can still show the notification via
+    // the notification payload that FCM delivers automatically.
+    return;
+  }
   
   try {
     await dotenv.load(fileName: "assets/.env");
     debugPrint("Firebase Background Handler: Env loaded, Supabase key present: ${dotenv.get('SUPABASE_ANON_KEY').isNotEmpty}");
-  } catch (_) {
+  } catch (e) {
+    debugPrint("Firebase Background Handler: dotenv load failed: $e");
   }
   
   // Initialize Supabase if needed for background sync
   try {
     await SupabaseService.initialize();
-  } catch (_) {}
+  } catch (e) {
+    debugPrint("Firebase Background Handler: Supabase init failed: $e");
+  }
+
+  debugPrint("Firebase Background Handler: message data = ${message.data}");
+  debugPrint("Firebase Background Handler: notification = ${message.notification?.title} / ${message.notification?.body}");
+
   if (message.data['type'] == 'chat' || message.data['type'] == 'message') {
     try {
       final localDb = LocalDatabaseService();
@@ -39,13 +55,14 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
         section: message.data['section'] ?? 'general',
       );
       await localDb.insertMessage(msg);
+      debugPrint("Firebase Background Handler: Message saved to local DB");
     } catch (e) {
       debugPrint("Background Data Sync Error: $e");
     }
   }
 
-  // 2. Show the notification alert
-  await _showBackgroundNotification(message);
+  // FCM automatically shows the notification UI when in background
+  // if the message contains a "notification" payload (which our Edge Function sends).
 }
 
 Future<void> _showBackgroundNotification(RemoteMessage message) async {
@@ -136,7 +153,7 @@ class NotificationService {
         }
       }
 
-      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+      // onBackgroundMessage is already called in main.dart
       FirebaseMessaging.onMessage.listen((message) {
         _handleMessage(message, showLocal: true);
       });
@@ -193,6 +210,7 @@ class NotificationService {
       importance: Importance.max,
       playSound: true,
       enableVibration: true,
+      showBadge: true,
     );
 
     await _local
@@ -234,6 +252,7 @@ class NotificationService {
         ticker: 'ticker',
         showWhen: true,
         category: AndroidNotificationCategory.message,
+        fullScreenIntent: true, // This helps with popups on some devices
       );
 
       const details = NotificationDetails(
@@ -299,57 +318,17 @@ class NotificationService {
 
   static Future<void> _upsertToken(String token, String userId, String section) async {
     final client = SupabaseService.client;
-    await client.from('device_tokens').upsert({
-      'user_id': userId,
-      'token': token,
-      'section': section,
-      'platform': Platform.isIOS ? 'ios' : Platform.isAndroid ? 'android' : 'other',
-      'updated_at': DateTime.now().toIso8601String(),
-    }, onConflict: 'token');
-  }
-
-  static Future<void> scheduleClassNotifications(List<ClassSession> classes) async {
     try {
-      // 1. Cancel all previous class notifications to avoid duplicates
-      // We use a specific range of IDs for classes (e.g., 2000-3000)
-      for (int i = 2000; i < 2100; i++) {
-        await _local.cancel(i);
-      }
-
-      final now = DateTime.now();
-      int idOffset = 2000;
-
-      for (var session in classes) {
-        if (session.status == 'cancelled') continue;
-
-        // Calculate next occurrence
-        DateTime scheduledDate = session.startTime;
-        
-        // If it's more than 10 minutes from now, schedule it
-        if (scheduledDate.isAfter(now.add(const Duration(minutes: 5)))) {
-          final notifyTime = scheduledDate.subtract(const Duration(minutes: 10));
-          
-          if (notifyTime.isAfter(now)) {
-            debugPrint("Scheduling Notification for ${session.name} at $notifyTime");
-            
-            await _local.show(
-              idOffset++,
-              'Upcoming Class: ${session.name}',
-              'Starting in 10 minutes at ${session.room}',
-              const NotificationDetails(
-                android: AndroidNotificationDetails(
-                  'class_reminders',
-                  'Class Reminders',
-                  importance: Importance.max,
-                  priority: Priority.high,
-                ),
-              ),
-            );
-          }
-        }
-      }
+      await client.from('device_tokens').upsert({
+        'user_id': userId,
+        'token': token,
+        'section': section,
+        'platform': Platform.isIOS ? 'ios' : Platform.isAndroid ? 'android' : 'other',
+        'updated_at': DateTime.now().toIso8601String(),
+      }, onConflict: 'token');
+      debugPrint("FCM Token successfully saved to Supabase!");
     } catch (e) {
-      debugPrint("Error scheduling class notifications: $e");
+      debugPrint("Failed to save FCM Token to Supabase: $e");
     }
   }
 }

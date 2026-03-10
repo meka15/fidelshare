@@ -6,6 +6,7 @@ import 'local_database_service.dart';
 import '../models/models.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'data_service.dart';
 
 @pragma('vm:entry-point')
 void callbackDispatcher() {
@@ -43,19 +44,28 @@ Future<void> _syncMissedMessages() async {
   try {
     final client = SupabaseService.client;
     final localDb = LocalDatabaseService();
+    final user = client.auth.currentUser;
     
-    // In a Telegram-like setup, we'd sync all relevant sections. 
-    // Here we'll fetch recently created messages across all sections for the user
+    if (user == null) return;
+
+    // 1. Get the user's section to only sync relevant messages
+    final profile = await client.from('profiles').select('section').eq('id', user.id).maybeSingle();
+    final section = profile?['section']?.toString();
+    
+    if (section == null) return;
+    
+    // 2. Fetch recently created messages specifically for this section
     final response = await client
         .from('chat_messages')
         .select()
+        .eq('section', section)
         .order('timestamp', ascending: false)
         .limit(20);
 
-     if (response != null && response is List) {
+    if (response != null && response is List) {
       final messages = response.map((m) => ChatMessage(
         id: m['id'].toString(),
-        role: m['sender_id'] == client.auth.currentUser?.id ? 'user' : 'model',
+        role: m['sender_id'] == user.id ? 'user' : 'model',
         senderId: m['sender_id']?.toString() ?? '',
         senderName: m['sender_name']?.toString() ?? 'User',
         text: m['text']?.toString() ?? '',
@@ -65,10 +75,9 @@ Future<void> _syncMissedMessages() async {
 
       int newCount = 0;
       for (var msg in messages) {
-        // We only notify for messages from others (role: 'model') 
-        // that haven't been seen in our local DB yet.
+        // We only notify for messages from others
         final exists = await localDb.getMessages(msg.section, limit: 50); 
-        if (!exists.any((e) => e.id == msg.id) && msg.role == 'model') {
+        if (!exists.any((e) => e.id == msg.id) && msg.senderId != user.id) {
           await NotificationService.showLocalNotification(
             title: msg.senderName,
             body: msg.text,
@@ -78,7 +87,7 @@ Future<void> _syncMissedMessages() async {
       }
       
       await localDb.insertMessages(messages);
-      debugPrint("Background Sync: ${messages.length} messages synced, $newCount new notifications.");
+      debugPrint("Background Sync: ${messages.length} messages synced for section $section, $newCount new notifications.");
     }
   } catch (e) {
     debugPrint("Background Message Sync Error: $e");
@@ -151,15 +160,27 @@ Future<void> _checkUpcomingClasses() async {
     for (var session in db.classes) {
       if (session.status == 'cancelled') continue;
       
-      // Calculate next occurrence
-      final startTime = session.startTime;
-      final diff = startTime.difference(now);
+      // Calculate next occurrence dynamically since the stored one might be from a previous week
+      final parts = session.time.split(':');
+      final hours = int.tryParse(parts[0]) ?? 0;
+      final mins = int.tryParse(parts[1]) ?? 0;
       
-      // If a class is starting in the next 20 minutes (and we are checking every 15)
-      if (diff.inMinutes > 0 && diff.inMinutes <= 20) {
+      var nextOccurrence = DateTime(now.year, now.month, now.day, hours, mins);
+      int targetWeekday = session.dayOfWeek == 0 ? 7 : session.dayOfWeek; 
+      int daysUntil = (targetWeekday - now.weekday + 7) % 7;
+      
+      if (daysUntil == 0 && nextOccurrence.isBefore(now)) {
+        daysUntil = 7;
+      }
+      nextOccurrence = nextOccurrence.add(Duration(days: daysUntil));
+
+      final diff = nextOccurrence.difference(now);
+      
+      // If a class is starting in the next 30 minutes
+      if (diff.inMinutes > 0 && diff.inMinutes <= 30) {
         NotificationService.showLocalNotification(
           title: 'Class Starting Soon!',
-          body: '${session.name} starts in ${diff.inMinutes} mins at ${session.room}',
+          body: '${session.name} starts at ${session.time} in ${session.room}',
         );
       }
     }

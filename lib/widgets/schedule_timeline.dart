@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
+import '../utils/time_utils.dart';
 
 class ScheduleTimeline extends StatelessWidget {
   final List<ClassSession> classes;
@@ -137,7 +138,7 @@ class _TimelineItem extends StatelessWidget {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    session.time,
+                    EthiopianTimeUtils.formatString(session.time),
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,

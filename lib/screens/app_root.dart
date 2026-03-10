@@ -8,6 +8,10 @@ import '../services/notification_service.dart';
 import '../services/supabase_service.dart';
 import 'main_screen.dart';
 import 'login_screen.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import '../models/update_info.dart';
+import '../services/update_service.dart';
 import '../widgets/splash_screen.dart';
 
 class AppRoot extends StatefulWidget {
@@ -596,6 +600,8 @@ class _AppRootState extends State<AppRoot> {
       if (session?.user != null) {
         await _completeLogin(session);
       }
+      // Check for app updates
+      _checkAppUpdate();
     } catch (_) {
       // ignore
     } finally {
@@ -633,7 +639,29 @@ class _AppRootState extends State<AppRoot> {
   Future<void> _handleAddAnnouncement(Announcement ann) async {
     setState(() => _announcements = [ann, ..._announcements]);
     if (_student != null) {
-      await DataService.addAnnouncement(ann, _student!.section);
+      final sectionId = _student!.section;
+      await DataService.addAnnouncement(ann, sectionId);
+      
+      // Trigger Push Notification for Announcement
+      try {
+        await SupabaseService.client.functions.invoke(
+          'send_push',
+          body: {
+            'section': sectionId,
+            'title': '📢 New Announcement',
+            'body': ann.title.isNotEmpty ? ann.title : 'Details inside',
+            'type': 'announcement',
+            'data': {
+              'id': ann.id,
+              'announcementTitle': ann.title,
+              'section': sectionId,
+            },
+          },
+        );
+        debugPrint('Announcement Push Sent Successfully');
+      } catch (e) {
+        debugPrint('Announcement Push Error: $e');
+      }
     }
   }
 
@@ -644,8 +672,26 @@ class _AppRootState extends State<AppRoot> {
 
   Future<void> _handleAddClass(ClassSession classData) async {
     if (_student == null) return;
+    final sectionId = _student!.section;
     setState(() => _classes = _mapClasses([..._classes, classData]));
-    await DataService.addClassSession(classData, _student!.section);
+    await DataService.addClassSession(classData, sectionId);
+
+    // Trigger Push Notification for Schedule
+    try {
+      await SupabaseService.client.functions.invoke(
+        'send_push',
+        body: {
+          'section': sectionId,
+          'title': '🗓️ Schedule Update',
+          'body': 'A new class "${classData.name}" has been added.',
+          'type': 'schedule',
+          'data': {
+            'id': classData.id,
+            'section': sectionId,
+          },
+        },
+      );
+    } catch (_) {}
   }
 
   Future<void> _handleUpdateClass(String id, Map<String, dynamic> updates) async {
@@ -671,6 +717,20 @@ class _AppRootState extends State<AppRoot> {
     });
 
     await DataService.addClassSession(updated, _student!.section);
+
+    // Trigger Push Notification for Update
+    try {
+      await SupabaseService.client.functions.invoke(
+        'send_push',
+        body: {
+          'section': _student!.section,
+          'title': '📝 Class Updated',
+          'body': 'The class "${updated.name}" has been updated.',
+          'type': 'schedule',
+          'data': {'id': updated.id},
+        },
+      );
+    } catch (_) {}
   }
 
   Future<void> _handleCancelClass(String id) async {
@@ -694,6 +754,20 @@ class _AppRootState extends State<AppRoot> {
     });
 
     await DataService.addClassSession(updated, _student!.section);
+
+    // Trigger Push Notification for Cancellation
+    try {
+      await SupabaseService.client.functions.invoke(
+        'send_push',
+        body: {
+          'section': _student!.section,
+          'title': '⚠️ Class ${newStatus.toUpperCase()}',
+          'body': 'The class "${updated.name}" is now $newStatus.',
+          'type': 'schedule',
+          'data': {'id': updated.id},
+        },
+      );
+    } catch (_) {}
   }
 
   Future<void> _handleAddFaculty(FacultyContact faculty) async {
@@ -705,7 +779,25 @@ class _AppRootState extends State<AppRoot> {
   Future<void> _handleAddMaterial(StudyMaterial material) async {
     setState(() => _materials = [material, ..._materials]);
     if (_student != null) {
-      await DataService.addMaterial(material, _student!.section);
+      final sectionId = _student!.section;
+      await DataService.addMaterial(material, sectionId);
+
+      // Trigger Push Notification for Material
+      try {
+        await SupabaseService.client.functions.invoke(
+          'send_push',
+          body: {
+            'section': sectionId,
+            'title': '📚 New Study Material',
+            'body': 'New resource: ${material.name}',
+            'type': 'material',
+            'data': {
+              'id': material.id,
+              'section': sectionId,
+            },
+          },
+        );
+      } catch (_) {}
     }
   }
 
@@ -754,6 +846,77 @@ class _AppRootState extends State<AppRoot> {
     await DataService.setFacultyVisibility(newValue);
     // Also update generic object just in case
     await DataService.updateSettings(_settings);
+  }
+
+  Future<void> _checkAppUpdate() async {
+    final update = await UpdateService.checkUpdate();
+    if (update == null || !mounted) return;
+
+    final packageInfo = await PackageInfo.fromPlatform();
+    final currentVersion = packageInfo.version;
+    final isForced = UpdateService.isForcedUpdate(currentVersion, update.minVersion);
+
+    _showUpdateDialog(update, isForced);
+  }
+
+  void _showUpdateDialog(AppUpdateInfo update, bool isForced) {
+    showDialog(
+      context: context,
+      barrierDismissible: !isForced,
+      builder: (context) => WillPopScope(
+        onWillPop: () async => !isForced,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              Icon(
+                isForced ? Icons.system_update_rounded : Icons.update_rounded,
+                color: const Color(0xFF2563EB),
+              ),
+              const SizedBox(width: 10),
+              Text(isForced ? 'Update Required' : 'New Update Available'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'A new version (${update.latestVersion}) is available. Please update to enjoy the latest features and fixes.',
+                style: const TextStyle(fontSize: 14),
+              ),
+              if (update.releaseNotes != null && update.releaseNotes!.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                const Text('What\'s new:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                const SizedBox(height: 4),
+                Text(update.releaseNotes!, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              ],
+            ],
+          ),
+          actions: [
+            if (!isForced)
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Maybe Later', style: TextStyle(color: Colors.grey)),
+              ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2563EB),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: () async {
+                final url = Uri.parse(update.updateUrl);
+                if (await canLaunchUrl(url)) {
+                  await launchUrl(url, mode: LaunchMode.externalApplication);
+                }
+              },
+              child: const Text('Update Now'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override

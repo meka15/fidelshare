@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
+import '../utils/time_utils.dart';
 import '../models/models.dart';
 import '../services/supabase_service.dart';
 import '../services/local_database_service.dart';
@@ -230,7 +231,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                   child: Icon(Icons.edit_rounded, size: 10, color: statusColor),
                                 ),
                               Text(
-                                DateFormat('h:mm a').format(DateTime.fromMillisecondsSinceEpoch(msg.timestamp)),
+                                EthiopianTimeUtils.format(DateTime.fromMillisecondsSinceEpoch(msg.timestamp)),
                                 style: GoogleFonts.inter(
                                   fontSize: 10,
                                   color: statusColor,
@@ -644,22 +645,29 @@ class _ChatScreenState extends State<ChatScreen> {
       // Send push notifications server-side (so secrets are not shipped in the app)
       try {
         final sectionId = _sectionId!;
-        await SupabaseService.client.functions.invoke(
-          'send_push',
-          body: {
-            'type': 'chat',
+        final payload = {
+          'section': sectionId,
+          // 'exclude_user_id': widget.userId,
+          'title': widget.student.name,
+          'body': text,
+          'type': 'chat',
+          'data': {
+            'message': text,
+            'senderId': widget.userId,
             'section': sectionId,
-            'exclude_user_id': widget.userId,
-            'title': widget.student.name,
-            'body': text,
-            'data': {
-              'senderId': widget.userId,
-              'senderName': widget.student.name,
-              'section': sectionId,
-              'timestamp': DateTime.now().millisecondsSinceEpoch.toString(),
-            },
           },
+        };
+        
+        debugPrint('--- SEND PUSH DEBUG ---');
+        debugPrint('Payload: $payload');
+        
+        final response = await SupabaseService.client.functions.invoke(
+          'send_push',
+          body: payload,
         );
+        
+        debugPrint('Response: ${response.data}');
+        debugPrint('-----------------------');
       } catch (e) {
         debugPrint('send_push invoke error: $e');
       }
@@ -724,7 +732,7 @@ class _ChatScreenState extends State<ChatScreen> {
             children: [
               Text('Sender: ${msg.senderName}', style: const TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              Text('Sent: ${DateFormat('MMM d, h:mm a').format(date)}'),
+              Text('Sent: ${EthiopianTimeUtils.format(date)}'),
               if (msg.isEdited) ...[
                 const SizedBox(height: 8),
                 const Text('Status: Edited', style: TextStyle(fontStyle: FontStyle.italic, fontSize: 12, color: Colors.blue)),
