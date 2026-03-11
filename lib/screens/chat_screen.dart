@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:realtime_client/realtime_client.dart';
 import 'package:intl/intl.dart';
 import '../utils/time_utils.dart';
 import '../models/models.dart';
 import '../services/supabase_service.dart';
 import '../services/local_database_service.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'dart:async';
 
 class ChatScreen extends StatefulWidget {
   final Student student;
@@ -30,6 +32,12 @@ class _ChatScreenState extends State<ChatScreen> {
   List<ChatMessage> _messages = [];
   String? _sectionId;
   RealtimeChannel? _channel;
+  
+  // Typing Indicator Logic
+  final Map<String, String> _typingUsers = {};
+  final Map<String, Timer> _typingTimers = {};
+  Timer? _localTypingTimer;
+  bool _isTyping = false;
 
   // SaaS Light Colors
   final Color _primaryBlue = const Color(0xFF2563EB);
@@ -41,6 +49,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
+    _controller.addListener(_onTypingChanged);
     _initChat();
     _checkConnectivity();
   }
@@ -48,6 +57,10 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     if (_channel != null) SupabaseService.client.removeChannel(_channel!);
+    _localTypingTimer?.cancel();
+    for (var timer in _typingTimers.values) {
+      timer.cancel();
+    }
     _controller.dispose();
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
@@ -341,6 +354,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     },
                   ),
           ),
+          _buildTypingIndicator(),
           _buildInputArea(),
         ],
       ),
@@ -351,7 +365,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _buildInputArea() {
     return Container(
-      padding: EdgeInsets.fromLTRB(16, 12, 16, MediaQuery.of(context).padding.bottom + 12),
+      padding: EdgeInsets.fromLTRB(16, 8, 16, MediaQuery.of(context).padding.bottom + 12),
       decoration: BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Colors.black.withOpacity(0.05)))),
       child: Row(
         children: [
@@ -375,6 +389,45 @@ class _ChatScreenState extends State<ChatScreen> {
               onPressed: _sendMessage,
             ),
           )
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTypingIndicator() {
+    if (_typingUsers.isEmpty) return const SizedBox.shrink();
+
+    String text;
+    if (_typingUsers.length == 1) {
+      text = "${_typingUsers.values.first} is typing...";
+    } else if (_typingUsers.length == 2) {
+      text = "${_typingUsers.values.elementAt(0)} and ${_typingUsers.values.elementAt(1)} are typing...";
+    } else {
+      text = "${_typingUsers.length} people are typing...";
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      color: Colors.white,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 20,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: List.generate(3, (index) => _TypingDot(index: index)),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            text,
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              color: _textGray,
+              fontStyle: FontStyle.italic,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
         ],
       ),
     );
@@ -619,7 +672,78 @@ class _ChatScreenState extends State<ChatScreen> {
           });
         }
       },
+    ).onBroadcast(
+      event: 'typing',
+      callback: (payload) {
+        final String? userId = payload['user_id']?.toString();
+        final String? userName = payload['user_name']?.toString();
+        final bool isTyping = payload['typing'] == true;
+
+        if (userId == null || userId == widget.userId) return;
+
+        setState(() {
+          if (isTyping) {
+            _typingUsers[userId] = userName ?? "Someone";
+            
+            // Timeout protection: remove user if no update for 4 seconds
+            _typingTimers[userId]?.cancel();
+            _typingTimers[userId] = Timer(const Duration(seconds: 4), () {
+              if (mounted) {
+                setState(() {
+                  _typingUsers.remove(userId);
+                  _typingTimers.remove(userId);
+                });
+              }
+            });
+          } else {
+            _typingUsers.remove(userId);
+            _typingTimers[userId]?.cancel();
+            _typingTimers[userId] = Timer(const Duration(milliseconds: 500), () { // Slight delay for smoother UI
+               if (mounted) {
+                 setState(() {
+                    _typingTimers.remove(userId);
+                 });
+               }
+            });
+          }
+        });
+      },
     ).subscribe();
+  }
+
+  void _onTypingChanged() {
+    final text = _controller.text.trim();
+    if (text.isNotEmpty && !_isTyping) {
+      _isTyping = true;
+      _sendTypingStatus(true);
+    }
+
+    _localTypingTimer?.cancel();
+    _localTypingTimer = Timer(const Duration(seconds: 3), () {
+      if (_isTyping) {
+        _isTyping = false;
+        _sendTypingStatus(false);
+      }
+    });
+
+    if (text.isEmpty && _isTyping) {
+      _isTyping = false;
+      _sendTypingStatus(false);
+      _localTypingTimer?.cancel();
+    }
+  }
+
+  void _sendTypingStatus(bool isTyping) {
+    if (_channel == null || _sectionId == null) return;
+    unawaited(_channel!.sendBroadcastMessage(
+      event: 'typing',
+      payload: {
+        'user_id': widget.userId,
+        'user_name': widget.student.name,
+        'section_id': _sectionId,
+        'typing': isTyping,
+      },
+    ));
   }
 
   Future<void> _sendMessage() async {
@@ -632,6 +756,10 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     
     _controller.clear();
+    _isTyping = false;
+    _sendTypingStatus(false);
+    _localTypingTimer?.cancel();
+    
     setState(() => _isSending = true);
     try {
       await SupabaseService.client.from('chat_messages').insert({
@@ -919,5 +1047,56 @@ class _ChatScreenState extends State<ChatScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
     });
+  }
+}
+
+class _TypingDot extends StatefulWidget {
+  final int index;
+  const _TypingDot({required this.index});
+
+  @override
+  State<_TypingDot> createState() => _TypingDotState();
+}
+
+class _TypingDotState extends State<_TypingDot> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+
+    _animation = Tween<double>(begin: 0.2, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+
+    Future.delayed(Duration(milliseconds: widget.index * 200), () {
+      if (mounted) _controller.repeat(reverse: true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _animation,
+      child: Container(
+        width: 4,
+        height: 4,
+        decoration: const BoxDecoration(
+          color: Color(0xFF64748B),
+          shape: BoxShape.circle,
+        ),
+      ),
+    );
   }
 }

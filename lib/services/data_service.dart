@@ -106,6 +106,22 @@ class DataService {
           ? classesRaw.map((c) {
              final dayOfWeek = (c['day_of_week'] as num?)?.toInt() ?? 1;
              final timeStr = c['time'] ?? '08:00';
+             final isPermanent = c['is_permanent'] ?? true;
+             final dateStr = c['date'];
+             final date = dateStr != null ? DateTime.parse(dateStr) : null;
+             
+             DateTime startTime;
+             if (isPermanent) {
+               startTime = _getNextOccurrence(dayOfWeek, timeStr);
+             } else if (date != null) {
+               final parts = timeStr.split(':');
+               final hours = int.tryParse(parts[0]) ?? 0;
+               final mins = int.tryParse(parts[1]) ?? 0;
+               startTime = DateTime(date.year, date.month, date.day, hours, mins);
+             } else {
+               startTime = DateTime.now();
+             }
+
              return ClassSession(
               id: c['id'].toString(),
               name: c['name'] ?? '',
@@ -113,9 +129,11 @@ class DataService {
               instructor: c['instructor'] ?? '',
               time: timeStr,
               status: c['status'] ?? 'upcoming',
-              startTime: _getNextOccurrence(dayOfWeek, timeStr),
+              startTime: startTime,
               dayOfWeek: dayOfWeek,
               section: (c['section'] ?? section).toString(),
+              isPermanent: isPermanent,
+              date: date,
             );
           }).toList()
           : local.classes;
@@ -335,6 +353,8 @@ class DataService {
             'day_of_week': itemJson['dayOfWeek'],
             'section': _coerceSectionValue(section),
             'user_id': userId,
+            'is_permanent': itemJson['isPermanent'] ?? true,
+            'date': itemJson['date'],
         };
     }
 
@@ -415,6 +435,9 @@ class AppDatabase {
         notifications: NotificationSettings(
           upcomingClasses: true, 
           newMaterials: true, 
+          chatEnabled: true,
+          announcementsEnabled: true,
+          scheduleEnabled: true,
           fingerprintEnabled: false
         ), 
         sync: SyncSettings(cloudProvider: 'supabase'),

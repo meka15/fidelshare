@@ -157,6 +157,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
             widget.settings.notifications.newMaterials,
             (v) => _updateNotify(materials: v)
           ),
+          _buildSettingsTile(
+            'Chat Messages', 
+            'Notify of new class messages', 
+            widget.settings.notifications.chatEnabled,
+            (v) => _updateNotify(chat: v)
+          ),
+          _buildSettingsTile(
+            'Announcements', 
+            'Notify of new general alerts', 
+            widget.settings.notifications.announcementsEnabled,
+            (v) => _updateNotify(ann: v)
+          ),
+          _buildSettingsTile(
+            'Schedule Updates', 
+            'Notify when classes change', 
+            widget.settings.notifications.scheduleEnabled,
+            (v) => _updateNotify(schedule: v)
+          ),
           _buildActionTile(
             'Send Test Alert', 
             'Triggers a local notification now', 
@@ -243,11 +261,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  void _updateNotify({bool? upcoming, bool? materials}) {
+  void _updateNotify({bool? upcoming, bool? materials, bool? chat, bool? ann, bool? schedule}) {
     widget.onUpdateSettings(EduSyncSettings(
       notifications: NotificationSettings(
         upcomingClasses: upcoming ?? widget.settings.notifications.upcomingClasses,
         newMaterials: materials ?? widget.settings.notifications.newMaterials,
+        chatEnabled: chat ?? widget.settings.notifications.chatEnabled,
+        announcementsEnabled: ann ?? widget.settings.notifications.announcementsEnabled,
+        scheduleEnabled: schedule ?? widget.settings.notifications.scheduleEnabled,
         fingerprintEnabled: widget.settings.notifications.fingerprintEnabled,
       ),
       sync: widget.settings.sync,

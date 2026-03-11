@@ -106,8 +106,10 @@ class _QuickActionsState extends State<QuickActions> {
     final nameController = TextEditingController();
     final instructorController = TextEditingController();
     final roomController = TextEditingController();
-    int dayOfWeek = 1;
+    int dayOfWeek = DateTime.now().weekday;
     TimeOfDay selectedTime = const TimeOfDay(hour: 8, minute: 0);
+    bool isPermanent = true;
+    DateTime selectedDate = DateTime.now();
 
     _showStyledModal(context, 'New Class Session', [
       TextField(controller: nameController, decoration: _inputStyle('Class Name', Icons.book_outlined)),
@@ -116,41 +118,89 @@ class _QuickActionsState extends State<QuickActions> {
       const SizedBox(height: 16),
       TextField(controller: roomController, decoration: _inputStyle('Room / Hall', Icons.place_outlined)),
       const SizedBox(height: 16),
-      Row(
-        children: [
-          Expanded(
-            child: StatefulBuilder(builder: (context, setModalState) {
-              return OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                onPressed: () async {
-                  final picked = await showTimePicker(context: context, initialTime: selectedTime);
-                  if (picked != null) setModalState(() => selectedTime = picked);
-                },
-                icon: const Icon(Icons.access_time),
-                label: Text(selectedTime.format(context)),
-              );
-            }),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: DropdownButtonFormField<int>(
-              value: dayOfWeek,
-              decoration: _inputStyle('Day', Icons.calendar_month),
-              items: const [
-                DropdownMenuItem(value: 1, child: Text('Mon')),
-                DropdownMenuItem(value: 2, child: Text('Tue')),
-                DropdownMenuItem(value: 3, child: Text('Wed')),
-                DropdownMenuItem(value: 4, child: Text('Thu')),
-                DropdownMenuItem(value: 5, child: Text('Fri')),
-              ],
-              onChanged: (v) => dayOfWeek = v ?? 1,
+      StatefulBuilder(builder: (context, setModalState) {
+        return Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(15),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    isPermanent ? 'Weekly Permanent' : 'One-time Temporary',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  Switch(
+                    value: isPermanent,
+                    onChanged: (val) => setModalState(() => isPermanent = val),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
-      ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: () async {
+                      final picked = await showTimePicker(context: context, initialTime: selectedTime);
+                      if (picked != null) setModalState(() => selectedTime = picked);
+                    },
+                    icon: const Icon(Icons.access_time),
+                    label: Text(selectedTime.format(context)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: isPermanent
+                      ? DropdownButtonFormField<int>(
+                          value: dayOfWeek > 5 ? 1 : dayOfWeek,
+                          decoration: _inputStyle('Day', Icons.calendar_month),
+                          items: const [
+                            DropdownMenuItem(value: 1, child: Text('Mon')),
+                            DropdownMenuItem(value: 2, child: Text('Tue')),
+                            DropdownMenuItem(value: 3, child: Text('Wed')),
+                            DropdownMenuItem(value: 4, child: Text('Thu')),
+                            DropdownMenuItem(value: 5, child: Text('Fri')),
+                          ],
+                          onChanged: (v) => dayOfWeek = v ?? 1,
+                        )
+                      : OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          onPressed: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: selectedDate,
+                              firstDate: DateTime.now(),
+                              lastDate: DateTime.now().add(const Duration(days: 365)),
+                            );
+                            if (picked != null) {
+                              setModalState(() {
+                                selectedDate = picked;
+                                dayOfWeek = picked.weekday;
+                              });
+                            }
+                          },
+                          icon: const Icon(Icons.calendar_today),
+                          label: Text('${selectedDate.month}/${selectedDate.day}'),
+                        ),
+                ),
+              ],
+            ),
+          ],
+        );
+      }),
       const SizedBox(height: 24),
       _buildSubmitButton('Add to Schedule', () {
         if (nameController.text.isEmpty || instructorController.text.isEmpty) return;
@@ -160,11 +210,15 @@ class _QuickActionsState extends State<QuickActions> {
           name: nameController.text,
           instructor: instructorController.text,
           room: roomController.text,
-          time: selectedTime.format(context),
+          time: '${selectedTime.hour.toString().padLeft(2, '0')}:${selectedTime.minute.toString().padLeft(2, '0')}',
           status: 'upcoming',
           dayOfWeek: dayOfWeek,
-          startTime: DateTime.now(),
+          startTime: isPermanent 
+              ? DateTime.now() // placeholder, DataService fix it
+              : DateTime(selectedDate.year, selectedDate.month, selectedDate.day, selectedTime.hour, selectedTime.minute),
           section: widget.student.section,
+          isPermanent: isPermanent,
+          date: isPermanent ? null : selectedDate,
         );
         widget.onAddClass(session);
         Navigator.pop(context);

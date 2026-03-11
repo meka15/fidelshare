@@ -7,6 +7,7 @@ class ScheduleScreen extends StatelessWidget {
   final bool isRepresentative;
   final Future<void> Function(String id) onCancelClass;
   final Future<void> Function(String id, Map<String, dynamic> updates) onUpdateClass;
+  final Future<void> Function(String id) onDeleteClass;
 
   const ScheduleScreen({
     super.key,
@@ -14,6 +15,7 @@ class ScheduleScreen extends StatelessWidget {
     required this.isRepresentative,
     required this.onCancelClass,
     required this.onUpdateClass,
+    required this.onDeleteClass,
   });
 
   @override
@@ -25,6 +27,7 @@ class ScheduleScreen extends StatelessWidget {
         isRepresentative: isRepresentative,
         onCancelClass: onCancelClass,
         onUpdateClass: onUpdateClass,
+        onDeleteClass: onDeleteClass,
       ),
     );
   }

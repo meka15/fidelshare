@@ -18,10 +18,19 @@ class ScheduleTimeline extends StatelessWidget {
   Widget build(BuildContext context) {
     final now = DateTime.now();
     
-    // Filter for today's classes
     final todayClasses = classes.where((c) {
       if (c.status == 'cancelled' && !isRepresentative) return false;
-      return c.dayOfWeek == now.weekday;
+      
+      // If permanent, check weekday
+      if (c.isPermanent) {
+        return c.dayOfWeek == now.weekday;
+      } else if (c.date != null) {
+        // If temporary, check if date is today
+        return c.date!.year == now.year && 
+               c.date!.month == now.month && 
+               c.date!.day == now.day;
+      }
+      return false;
     }).toList();
 
     todayClasses.sort((a, b) => a.time.compareTo(b.time)); // Sorting by time string
@@ -169,14 +178,30 @@ class _TimelineItem extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          session.name,
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                            color: isCancelled ? Colors.grey : null,
-                            decoration: isCancelled ? TextDecoration.lineThrough : null,
-                          ),
+                        Row(
+                          children: [
+                            Text(
+                              session.name,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: isCancelled ? Colors.grey : null,
+                                decoration: isCancelled ? TextDecoration.lineThrough : null,
+                              ),
+                            ),
+                            if (!session.isPermanent) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                                ),
+                                child: const Text('TEMP', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.orange)),
+                              ),
+                            ]
+                          ],
                         ),
                         const SizedBox(height: 4),
                         Row(

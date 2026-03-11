@@ -26,6 +26,7 @@ class MainScreen extends StatefulWidget {
   final Future<void> Function(String id) onDeleteAnnouncement;
   final Future<void> Function(ClassSession classData) onAddClass;
   final Future<void> Function(String id, Map<String, dynamic> updates) onUpdateClass;
+  final Future<void> Function(String id) onDeleteClass;
   final Future<void> Function(String id) onCancelClass;
   final Future<void> Function(FacultyContact faculty) onAddFaculty;
   final Future<void> Function(StudyMaterial material) onAddMaterial;
@@ -54,6 +55,7 @@ class MainScreen extends StatefulWidget {
     required this.onDeleteAnnouncement,
     required this.onAddClass,
     required this.onUpdateClass,
+    required this.onDeleteClass,
     required this.onCancelClass,
     required this.onAddFaculty,
     required this.onAddMaterial,
@@ -107,6 +109,7 @@ class _MainScreenState extends State<MainScreen> {
         isRepresentative: widget.student.isRepresentative,
         onCancelClass: widget.onCancelClass,
         onUpdateClass: widget.onUpdateClass,
+        onDeleteClass: widget.onDeleteClass,
       ),
       AppTab.materials: MaterialsScreen(
         materials: widget.materials,

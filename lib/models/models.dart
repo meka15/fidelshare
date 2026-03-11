@@ -52,6 +52,8 @@ class ClassSession {
   final DateTime startTime;
   final int dayOfWeek;
   final String section;
+  final bool isPermanent;
+  final DateTime? date;
 
   ClassSession({
     required this.id,
@@ -63,6 +65,8 @@ class ClassSession {
     required this.startTime,
     required this.dayOfWeek,
     required this.section,
+    this.isPermanent = true,
+    this.date,
   });
 
   factory ClassSession.fromJson(Map<String, dynamic> json) {
@@ -76,6 +80,8 @@ class ClassSession {
       startTime: DateTime.parse(json['startTime']),
       dayOfWeek: json['dayOfWeek'],
       section: json['section'],
+      isPermanent: json['isPermanent'] ?? true,
+      date: json['date'] != null ? DateTime.parse(json['date']) : null,
     );
   }
 
@@ -90,6 +96,8 @@ class ClassSession {
       'startTime': startTime.toIso8601String(),
       'dayOfWeek': dayOfWeek,
       'section': section,
+      'isPermanent': isPermanent,
+      'date': date?.toIso8601String(),
     };
   }
 }
@@ -344,19 +352,28 @@ class AppNotification {
 class NotificationSettings {
   final bool upcomingClasses;
   final bool newMaterials;
+  final bool chatEnabled;
+  final bool announcementsEnabled;
+  final bool scheduleEnabled;
   final bool fingerprintEnabled;
 
   NotificationSettings({
     required this.upcomingClasses,
     required this.newMaterials,
+    required this.chatEnabled,
+    required this.announcementsEnabled,
+    required this.scheduleEnabled,
     required this.fingerprintEnabled,
   });
 
   factory NotificationSettings.fromJson(Map<String, dynamic> json) {
     return NotificationSettings(
-      upcomingClasses: json['upcomingClasses'],
-      newMaterials: json['newMaterials'],
-      fingerprintEnabled: json['fingerprintEnabled'],
+      upcomingClasses: json['upcomingClasses'] ?? true,
+      newMaterials: json['newMaterials'] ?? true,
+      chatEnabled: json['chatEnabled'] ?? true,
+      announcementsEnabled: json['announcementsEnabled'] ?? true,
+      scheduleEnabled: json['scheduleEnabled'] ?? true,
+      fingerprintEnabled: json['fingerprintEnabled'] ?? false,
     );
   }
 
@@ -364,6 +381,9 @@ class NotificationSettings {
     return {
       'upcomingClasses': upcomingClasses,
       'newMaterials': newMaterials,
+      'chatEnabled': chatEnabled,
+      'announcementsEnabled': announcementsEnabled,
+      'scheduleEnabled': scheduleEnabled,
       'fingerprintEnabled': fingerprintEnabled,
     };
   }

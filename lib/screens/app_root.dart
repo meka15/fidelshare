@@ -84,12 +84,14 @@ class _AppRootState extends State<AppRoot> {
           final ann = _announcementFromRecord(payload.newRecord);
           if (ann == null) return;
           _upsertAnnouncement(ann);
-          NotificationService.notifySimple(
-            title: 'New announcement',
-            body: ann.title.isNotEmpty ? ann.title : 'A new announcement was posted.',
-            type: 'announcement',
-            showLocal: true,
-          );
+          if (_settings.notifications.announcementsEnabled) {
+            NotificationService.notifySimple(
+              title: 'New announcement',
+              body: ann.title.isNotEmpty ? ann.title : 'A new announcement was posted.',
+              type: 'announcement',
+              showLocal: true,
+            );
+          }
         },
       )
       ..onPostgresChanges(
@@ -128,12 +130,14 @@ class _AppRootState extends State<AppRoot> {
           final material = _materialFromRecord(payload.newRecord);
           if (material == null) return;
           _upsertMaterial(material);
-          NotificationService.notifySimple(
-            title: 'New material',
-            body: material.name.isNotEmpty ? material.name : 'New material added.',
-            type: 'material',
-            showLocal: true,
-          );
+          if (_settings.notifications.newMaterials) {
+            NotificationService.notifySimple(
+              title: 'New material',
+              body: material.name.isNotEmpty ? material.name : 'New material added.',
+              type: 'material',
+              showLocal: true,
+            );
+          }
         },
       )
       ..onPostgresChanges(
@@ -172,12 +176,14 @@ class _AppRootState extends State<AppRoot> {
           final session = _classFromRecord(payload.newRecord);
           if (session == null) return;
           _upsertClass(session);
-          NotificationService.notifySimple(
-            title: 'Schedule update',
-            body: session.name.isNotEmpty ? session.name : 'Class schedule changed.',
-            type: 'schedule',
-            showLocal: true,
-          );
+          if (_settings.notifications.scheduleEnabled) {
+            NotificationService.notifySimple(
+              title: 'Schedule update',
+              body: session.name.isNotEmpty ? session.name : 'Class schedule changed.',
+              type: 'schedule',
+              showLocal: true,
+            );
+          }
         },
       )
       ..onPostgresChanges(
@@ -194,12 +200,14 @@ class _AppRootState extends State<AppRoot> {
           final session = _classFromRecord(payload.newRecord);
           if (session == null) return;
           _upsertClass(session);
-          NotificationService.notifySimple(
-            title: 'Schedule update',
-            body: session.name.isNotEmpty ? session.name : 'Class schedule changed.',
-            type: 'schedule',
-            showLocal: true,
-          );
+          if (_settings.notifications.scheduleEnabled) {
+            NotificationService.notifySimple(
+              title: 'Schedule update',
+              body: session.name.isNotEmpty ? session.name : 'Class schedule changed.',
+              type: 'schedule',
+              showLocal: true,
+            );
+          }
         },
       )
       ..onPostgresChanges(
@@ -279,6 +287,22 @@ class _AppRootState extends State<AppRoot> {
     final day = (record['day_of_week'] ?? record['dayOfWeek']) as num?;
     final timeStr = record['time']?.toString() ?? '08:00';
     final dayValue = day?.toInt() ?? 1;
+    final isPermanent = record['is_permanent'] ?? true;
+    final dateStr = record['date'];
+    final date = dateStr != null ? DateTime.parse(dateStr) : null;
+
+    DateTime startTime;
+    if (isPermanent) {
+      startTime = _getNextOccurrence(dayValue, timeStr);
+    } else if (date != null) {
+      final parts = timeStr.split(':');
+      final hours = int.tryParse(parts[0]) ?? 0;
+      final mins = int.tryParse(parts[1]) ?? 0;
+      startTime = DateTime(date.year, date.month, date.day, hours, mins);
+    } else {
+      startTime = DateTime.now();
+    }
+
     return ClassSession(
       id: record['id'].toString(),
       name: record['name']?.toString() ?? '',
@@ -286,9 +310,11 @@ class _AppRootState extends State<AppRoot> {
       instructor: record['instructor']?.toString() ?? '',
       time: timeStr,
       status: record['status']?.toString() ?? 'upcoming',
-      startTime: _getNextOccurrence(dayValue, timeStr),
+      startTime: startTime,
       dayOfWeek: dayValue,
       section: record['section']?.toString() ?? '',
+      isPermanent: isPermanent,
+      date: date,
     );
   }
 
@@ -320,27 +346,49 @@ class _AppRootState extends State<AppRoot> {
     });
   }
 
-  Future<String?> _fetchChatSectionId(String userId) async {
+  Future<Student?> _refetchFullProfile(String userId) async {
     try {
       final client = SupabaseService.client;
       final data = await client
           .from('profiles')
-          .select('section')
+          .select()
           .eq('id', userId)
           .maybeSingle();
 
-      if (data != null && data['section'] != null) {
-        return data['section'].toString();
+      if (data != null) {
+        return Student(
+          name: data['name'] ?? 'Student',
+          studentId: data['student_id'] ?? userId.substring(0, 8).toUpperCase(),
+          section: data['section']?.toString() ?? 'GENERAL',
+          isRepresentative: (data['is_representative'] ?? false) == true,
+          batch: data['batch'] != null ? int.tryParse(data['batch'].toString()) : null,
+        );
       }
-    } catch (_) {
-      // ignore
+    } catch (e) {
+      debugPrint("Refetch Profile Error: $e");
     }
     return null;
   }
 
   Future<void> _startChatRealtime(String userId) async {
-    final sectionId = await _fetchChatSectionId(userId);
-    if (sectionId == null) return;
+    final profile = await _refetchFullProfile(userId);
+    if (profile == null) return;
+    
+    // Update global state if profile data changed (fixing consistency issues)
+    if (_student == null || 
+        _student!.section != profile.section || 
+        _student!.isRepresentative != profile.isRepresentative ||
+        _student!.studentId != profile.studentId) {
+      debugPrint("Updating Student State from DB: ${profile.section}, Rep: ${profile.isRepresentative}");
+      setState(() {
+        _student = profile;
+      });
+      // Re-trigger sync for the correct section
+      _syncData(profile.section, silent: true);
+      _startRealtimeChannels(profile.section);
+    }
+
+    final sectionId = profile.section;
     if (_chatSectionId == sectionId && _chatChannel != null) return;
 
     _chatSectionId = sectionId;
@@ -349,8 +397,6 @@ class _AppRootState extends State<AppRoot> {
     final client = SupabaseService.client;
     final channel = client.channel('realtime-chat-notif-$sectionId');
     _chatChannel = channel;
-
-    debugPrint("Starting Chat Realtime for Section: '$sectionId'");
 
     channel.onPostgresChanges(
       event: PostgresChangeEvent.insert,
@@ -369,12 +415,14 @@ class _AppRootState extends State<AppRoot> {
         final senderName = m['sender_name']?.toString() ?? 'Someone';
         final text = m['text']?.toString() ?? '';
 
-        NotificationService.notifySimple(
-          title: 'New message',
-          body: text.isNotEmpty ? '$senderName: $text' : '$senderName sent a message.',
-          type: 'chat',
-          showLocal: true,
-        );
+        if (_settings.notifications.chatEnabled) {
+          NotificationService.notifySimple(
+            title: 'New message',
+            body: text.isNotEmpty ? '$senderName: $text' : '$senderName sent a message.',
+            type: 'chat',
+            showLocal: true,
+          );
+        }
       },
     ).subscribe((status, [error]) {
       debugPrint("Realtime Subscription Status (Chat): $status ${error ?? ''}");
@@ -405,17 +453,33 @@ class _AppRootState extends State<AppRoot> {
 
   List<ClassSession> _mapClasses(List<ClassSession> raw) {
     final mapped = raw
-        .map((c) => ClassSession(
-              id: c.id,
-              name: c.name,
-              room: c.room,
-              instructor: c.instructor,
-              time: c.time,
-              status: c.status,
-              startTime: _getNextOccurrence(c.dayOfWeek, c.time),
-              dayOfWeek: c.dayOfWeek,
-              section: c.section,
-            ))
+        .map((c) {
+          DateTime startTime;
+          if (c.isPermanent) {
+            startTime = _getNextOccurrence(c.dayOfWeek, c.time);
+          } else if (c.date != null) {
+            final parts = c.time.split(':');
+            final hours = int.tryParse(parts[0]) ?? 0;
+            final mins = int.tryParse(parts[1]) ?? 0;
+            startTime = DateTime(c.date!.year, c.date!.month, c.date!.day, hours, mins);
+          } else {
+            startTime = DateTime.now();
+          }
+          
+          return ClassSession(
+            id: c.id,
+            name: c.name,
+            room: c.room,
+            instructor: c.instructor,
+            time: c.time,
+            status: c.status,
+            startTime: startTime,
+            dayOfWeek: c.dayOfWeek,
+            section: c.section,
+            isPermanent: c.isPermanent,
+            date: c.date,
+          );
+        })
         .toList();
     mapped.sort((a, b) => a.startTime.compareTo(b.startTime));
     return mapped;
@@ -424,6 +488,18 @@ class _AppRootState extends State<AppRoot> {
   Future<void> _syncData(String section, {bool silent = false}) async {
     if (!silent) setState(() => _isSyncing = true);
     try {
+      // Proactively try to refresh profile data if possible
+      if (_internalUserId != null) {
+        final latestProfile = await _refetchFullProfile(_internalUserId!);
+        if (latestProfile != null && _student != null) {
+          if (latestProfile.section != _student!.section || 
+              latestProfile.isRepresentative != _student!.isRepresentative) {
+            setState(() => _student = latestProfile);
+            section = latestProfile.section; // Use the updated section for the rest of the sync
+          }
+        }
+      }
+
       final prevAnnouncements = List<Announcement>.from(_announcements);
       final prevMaterials = List<StudyMaterial>.from(_materials);
       final prevClasses = List<ClassSession>.from(_classes);
@@ -436,12 +512,14 @@ class _AppRootState extends State<AppRoot> {
         );
 
         for (final ann in newAnnouncements) {
-          NotificationService.notifySimple(
-            title: 'New announcement',
-            body: ann.title.isNotEmpty ? ann.title : 'A new announcement was posted.',
-            type: 'announcement',
-            showLocal: true,
-          );
+          if (_settings.notifications.announcementsEnabled) {
+            NotificationService.notifySimple(
+              title: 'New announcement',
+              body: ann.title.isNotEmpty ? ann.title : 'A new announcement was posted.',
+              type: 'announcement',
+              showLocal: true,
+            );
+          }
         }
 
         if (_settings.notifications.newMaterials) {
@@ -458,7 +536,7 @@ class _AppRootState extends State<AppRoot> {
           }
         }
 
-        if (_settings.notifications.upcomingClasses) {
+        if (_settings.notifications.scheduleEnabled) {
           for (final next in nextClasses) {
             final previous = prevClasses.firstWhere(
               (c) => c.id == next.id,
@@ -705,11 +783,15 @@ class _AppRootState extends State<AppRoot> {
       time: updates['time'] ?? target.time,
       status: updates['status'] ?? target.status,
       dayOfWeek: updates['dayOfWeek'] ?? target.dayOfWeek,
-      startTime: _getNextOccurrence(
-        updates['dayOfWeek'] ?? target.dayOfWeek,
-        updates['time'] ?? target.time,
-      ),
+      startTime: (updates['isPermanent'] ?? target.isPermanent)
+          ? _getNextOccurrence(
+              updates['dayOfWeek'] ?? target.dayOfWeek,
+              updates['time'] ?? target.time,
+            )
+          : (updates['date'] ?? target.date ?? DateTime.now()),
       section: target.section,
+      isPermanent: updates['isPermanent'] ?? target.isPermanent,
+      date: updates['date'] ?? target.date,
     );
 
     setState(() {
@@ -747,6 +829,8 @@ class _AppRootState extends State<AppRoot> {
       startTime: target.startTime,
       dayOfWeek: target.dayOfWeek,
       section: target.section,
+      isPermanent: target.isPermanent,
+      date: target.date,
     );
 
     setState(() {
@@ -768,6 +852,13 @@ class _AppRootState extends State<AppRoot> {
         },
       );
     } catch (_) {}
+  }
+
+  Future<void> _handleDeleteClass(String id) async {
+    setState(() {
+      _classes = _classes.where((c) => c.id != id).toList();
+    });
+    await DataService.removeFromCollection('classes', id);
   }
 
   Future<void> _handleAddFaculty(FacultyContact faculty) async {
@@ -943,6 +1034,7 @@ class _AppRootState extends State<AppRoot> {
       onAddClass: _handleAddClass,
       onUpdateClass: _handleUpdateClass,
       onCancelClass: _handleCancelClass,
+      onDeleteClass: _handleDeleteClass,
       onAddFaculty: _handleAddFaculty,
       onAddMaterial: _handleAddMaterial,
       onDeleteMaterial: _handleDeleteMaterial,
