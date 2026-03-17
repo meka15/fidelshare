@@ -17,10 +17,10 @@ class LocalDatabaseService {
   }
 
   Future<Database> _initDatabase() async {
-    String path = join(await getDatabasesPath(), 'fidelshare_chat_v3.db');
+    String path = join(await getDatabasesPath(), 'fidelshare_chat_v5.db');
     return await openDatabase(
       path,
-      version: 3,
+      version: 5,
       onCreate: _onCreate,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -28,6 +28,12 @@ class LocalDatabaseService {
         }
         if (oldVersion < 3) {
           await db.execute('ALTER TABLE chat_messages ADD COLUMN seen_by TEXT DEFAULT "[]"');
+        }
+        if (oldVersion < 4) {
+          await db.execute('ALTER TABLE chat_messages ADD COLUMN group_id TEXT');
+        }
+        if (oldVersion < 5) {
+          await db.execute('ALTER TABLE chat_messages ADD COLUMN sender_avatar_url TEXT');
         }
       },
     );
@@ -40,9 +46,11 @@ class LocalDatabaseService {
         role TEXT,
         sender_id TEXT,
         sender_name TEXT,
+        sender_avatar_url TEXT,
         text TEXT,
         timestamp INTEGER,
         section TEXT,
+        group_id TEXT,
         is_edited INTEGER DEFAULT 0,
         seen_by TEXT DEFAULT "[]"
       )
@@ -51,6 +59,9 @@ class LocalDatabaseService {
     // Create index on section and timestamp
     await db.execute(
       'CREATE INDEX idx_chat_section_time ON chat_messages(section, timestamp DESC)'
+    );
+    await db.execute(
+      'CREATE INDEX idx_chat_group_time ON chat_messages(group_id, timestamp DESC)'
     );
   }
 
@@ -65,9 +76,11 @@ class LocalDatabaseService {
           'role': msg.role,
           'sender_id': msg.senderId,
           'sender_name': msg.senderName,
+          'sender_avatar_url': msg.senderAvatarUrl,
           'text': msg.text,
           'timestamp': msg.timestamp,
           'section': msg.section,
+          'group_id': msg.groupId,
           'is_edited': msg.isEdited ? 1 : 0,
           'seen_by': jsonEncode(msg.seenBy),
         },
@@ -86,9 +99,11 @@ class LocalDatabaseService {
         'role': msg.role,
         'sender_id': msg.senderId,
         'sender_name': msg.senderName,
+        'sender_avatar_url': msg.senderAvatarUrl,
         'text': msg.text,
         'timestamp': msg.timestamp,
         'section': msg.section,
+        'group_id': msg.groupId,
         'is_edited': msg.isEdited ? 1 : 0,
         'seen_by': jsonEncode(msg.seenBy),
       },
@@ -97,19 +112,27 @@ class LocalDatabaseService {
   }
 
   Future<List<ChatMessage>> getMessages(String section, {int? beforeTimestamp, int limit = 20}) async {
+    return _getMessages(where: 'section = ?', whereArgs: [section], beforeTimestamp: beforeTimestamp, limit: limit);
+  }
+
+  Future<List<ChatMessage>> getGroupMessages(String groupId, {int? beforeTimestamp, int limit = 20}) async {
+    return _getMessages(where: 'group_id = ?', whereArgs: [groupId], beforeTimestamp: beforeTimestamp, limit: limit);
+  }
+
+  Future<List<ChatMessage>> _getMessages({required String where, required List<dynamic> whereArgs, int? beforeTimestamp, int limit = 20}) async {
     final db = await database;
-    String whereString = 'section = ?';
-    List<dynamic> whereArgs = [section];
+    String whereString = where;
+    List<dynamic> args = List.from(whereArgs);
 
     if (beforeTimestamp != null) {
       whereString += ' AND timestamp < ?';
-      whereArgs.add(beforeTimestamp);
+      args.add(beforeTimestamp);
     }
 
     final List<Map<String, dynamic>> maps = await db.query(
       'chat_messages',
       where: whereString,
-      whereArgs: whereArgs,
+      whereArgs: args,
       orderBy: 'timestamp DESC',
       limit: limit,
     );
@@ -119,9 +142,11 @@ class LocalDatabaseService {
       role: m['role']?.toString() ?? 'user',
       senderId: m['sender_id']?.toString() ?? '',
       senderName: m['sender_name']?.toString() ?? 'Unknown',
+      senderAvatarUrl: m['sender_avatar_url']?.toString(),
       text: m['text']?.toString() ?? '',
       timestamp: m['timestamp'] as int,
-      section: m['section']?.toString() ?? '',
+      section: m['section']?.toString(),
+      groupId: m['group_id']?.toString(),
       isEdited: (m['is_edited'] as int? ?? 0) == 1,
       seenBy: m['seen_by'] != null 
           ? List<Map<String, String>>.from(
@@ -131,12 +156,20 @@ class LocalDatabaseService {
   }
 
   Future<int?> getLatestTimestamp(String section) async {
+    return _getLatestTimestamp('section = ?', [section]);
+  }
+
+  Future<int?> getLatestGroupTimestamp(String groupId) async {
+    return _getLatestTimestamp('group_id = ?', [groupId]);
+  }
+
+  Future<int?> _getLatestTimestamp(String where, List<dynamic> whereArgs) async {
     final db = await database;
     final result = await db.query(
       'chat_messages',
       columns: ['timestamp'],
-      where: 'section = ?',
-      whereArgs: [section],
+      where: where,
+      whereArgs: whereArgs,
       orderBy: 'timestamp DESC',
       limit: 1,
     );

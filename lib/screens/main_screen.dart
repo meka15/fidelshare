@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 //import 'package:google_fonts/google_fonts.dart';
 import '../models/models.dart';
 import 'home_screen.dart';
 import 'schedule_screen.dart';
 import 'materials_screen.dart';
-import 'chat_screen.dart';
+import 'chat_list_screen.dart';
 import 'profile_screen.dart';
 import '../widgets/announcement_list_view.dart';
 import '../widgets/notification_center.dart';
+import '../widgets/fantastic_bottom_nav_bar.dart';
 
 class MainScreen extends StatefulWidget {
   // ... (All your existing final variables and constructor stay exactly the same)
@@ -25,7 +27,8 @@ class MainScreen extends StatefulWidget {
   final Future<void> Function(Announcement ann) onAddAnnouncement;
   final Future<void> Function(String id) onDeleteAnnouncement;
   final Future<void> Function(ClassSession classData) onAddClass;
-  final Future<void> Function(String id, Map<String, dynamic> updates) onUpdateClass;
+  final Future<void> Function(String id, Map<String, dynamic> updates)
+  onUpdateClass;
   final Future<void> Function(String id) onDeleteClass;
   final Future<void> Function(String id) onCancelClass;
   final Future<void> Function(FacultyContact faculty) onAddFaculty;
@@ -81,8 +84,14 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     // SaaS Colors
-    const Color primaryBlue = Color(0xFF2563EB);
     const Color bgWhite = Colors.white;
+    const navTabs = [
+      AppTab.home,
+      AppTab.schedule,
+      AppTab.materials,
+      AppTab.profile,
+    ];
+    final selectedNavIndex = navTabs.indexOf(_currentTab);
 
     final Map<AppTab, Widget> screens = {
       AppTab.home: HomeScreen(
@@ -118,10 +127,6 @@ class _MainScreenState extends State<MainScreen> {
         onDeleteMaterial: widget.onDeleteMaterial,
         onDownloadMaterial: widget.onDownloadMaterial,
       ),
-      AppTab.chat: ChatScreen(
-        student: widget.student,
-        userId: widget.internalUserId,
-      ),
       AppTab.profile: ProfileScreen(
         student: widget.student,
         settings: widget.settings,
@@ -132,6 +137,7 @@ class _MainScreenState extends State<MainScreen> {
 
     return Scaffold(
       backgroundColor: bgWhite,
+      extendBody: true,
       body: Stack(
         children: [
           // Smooth tab transitions
@@ -139,7 +145,7 @@ class _MainScreenState extends State<MainScreen> {
             duration: const Duration(milliseconds: 200),
             child: screens[_currentTab]!,
           ),
-          
+
           if (_isAnnViewOpen)
             AnnouncementListView(
               announcements: widget.announcements,
@@ -162,39 +168,28 @@ class _MainScreenState extends State<MainScreen> {
             ),
         ],
       ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          border: Border(top: BorderSide(color: Colors.black.withOpacity(0.05), width: 1)),
-        ),
-        child: NavigationBar(
-          backgroundColor: bgWhite,
-          indicatorColor: primaryBlue.withOpacity(0.1),
-          height: 70,
-          elevation: 0,
-          selectedIndex: _currentTab.index,
-          onDestinationSelected: (index) {
-            setState(() {
-              _currentTab = AppTab.values[index];
-            });
-          },
-          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-          destinations: [
-            _navItem(Icons.grid_view_rounded, Icons.grid_view_outlined, 'Home'),
-            _navItem(Icons.calendar_today_rounded, Icons.calendar_today_outlined, 'Schedule'),
-            _navItem(Icons.folder_rounded, Icons.folder_outlined, 'Files'),
-            _navItem(Icons.chat_bubble_rounded, Icons.chat_bubble_outline_rounded, 'Chat'),
-            _navItem(Icons.person_rounded, Icons.person_outline_rounded, 'Profile'),
-          ],
-        ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endDocked,
+      bottomNavigationBar: FantasticBottomNavBar(
+        selectedIndex: selectedNavIndex < 0 ? 0 : selectedNavIndex,
+        onDestinationSelected: (index) {
+          setState(() {
+            _currentTab = navTabs[index];
+          });
+          HapticFeedback.lightImpact();
+        },
+        onChatPressed: () {
+          HapticFeedback.mediumImpact();
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ChatListScreen(
+                student: widget.student,
+                userId: widget.internalUserId,
+              ),
+            ),
+          );
+        },
       ),
-    );
-  }
-
-  NavigationDestination _navItem(IconData selected, IconData unselected, String label) {
-    return NavigationDestination(
-      icon: Icon(unselected, color: const Color(0xFF64748B), size: 24),
-      selectedIcon: Icon(selected, color: const Color(0xFF2563EB), size: 24),
-      label: label,
     );
   }
 }

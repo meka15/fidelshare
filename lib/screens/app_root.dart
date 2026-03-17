@@ -595,6 +595,7 @@ class _AppRootState extends State<AppRoot> {
     final nameFromMetadata = metadata?['full_name'] ?? metadata?['name'] ?? 'Student';
     final idFromMetadata = metadata?['student_id'] ?? userId.substring(0, 8).toUpperCase();
     final batchFromMetadata = metadata?['batch'] != null ? int.tryParse(metadata!['batch'].toString()) : null;
+    final avatarFromMetadata = metadata?['avater_url']?.toString();
 
     final fallback = Student(
       name: nameFromMetadata,
@@ -602,6 +603,7 @@ class _AppRootState extends State<AppRoot> {
       section: sectionFromMetadata,
       isRepresentative: false,
       batch: batchFromMetadata,
+      avatarUrl: avatarFromMetadata,
     );
 
     try {
@@ -633,6 +635,7 @@ class _AppRootState extends State<AppRoot> {
           section: upserted['section'] ?? fallback.section,
           isRepresentative: (upserted['is_representative'] ?? false) == true,
           batch: upserted['batch'] != null ? int.tryParse(upserted['batch'].toString()) : fallback.batch,
+          avatarUrl: upserted['avater_url'],
         );
       }
 
@@ -645,6 +648,7 @@ class _AppRootState extends State<AppRoot> {
         section: sectionValue,
         isRepresentative: (data['is_representative'] ?? false) == true,
         batch: data['batch'] != null ? int.tryParse(data['batch'].toString()) : fallback.batch,
+        avatarUrl: data['avater_url'],
       );
     } catch (e) {
       debugPrint("Profile Fetch Error: $e");
@@ -921,33 +925,39 @@ class _AppRootState extends State<AppRoot> {
   void _updateSettings(EduSyncSettings newSettings) {
     setState(() => _settings = newSettings);
     DataService.updateSettings(newSettings);
+    NotificationService.updateSettings(newSettings.notifications);
   }
 
   Future<void> _toggleFacultyVisibility() async {
     final newValue = !_settings.facultyVisible;
-    setState(() {
-      _settings = EduSyncSettings(
-        notifications: _settings.notifications,
-        sync: _settings.sync,
-        appearance: _settings.appearance,
-        facultyVisible: newValue,
-      );
-    });
+    final updated = EduSyncSettings(
+      notifications: _settings.notifications,
+      sync: _settings.sync,
+      appearance: _settings.appearance,
+      facultyVisible: newValue,
+    );
+    setState(() => _settings = updated);
+    
     // Persist specifically to the key used for override
     await DataService.setFacultyVisibility(newValue);
     // Also update generic object just in case
-    await DataService.updateSettings(_settings);
+    await DataService.updateSettings(updated);
+    NotificationService.updateSettings(updated.notifications);
   }
 
   Future<void> _checkAppUpdate() async {
-    final update = await UpdateService.checkUpdate();
-    if (update == null || !mounted) return;
+    try {
+      final update = await UpdateService.checkUpdate();
+      if (update == null || !mounted) return;
 
-    final packageInfo = await PackageInfo.fromPlatform();
-    final currentVersion = packageInfo.version;
-    final isForced = UpdateService.isForcedUpdate(currentVersion, update.minVersion);
+      final packageInfo = await PackageInfo.fromPlatform();
+      final currentVersion = packageInfo.version;
+      final isForced = UpdateService.isForcedUpdate(currentVersion, update.minVersion);
 
-    _showUpdateDialog(update, isForced);
+      _showUpdateDialog(update, isForced);
+    } catch (_) {
+      // ignore
+    }
   }
 
   void _showUpdateDialog(AppUpdateInfo update, bool isForced) {

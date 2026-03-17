@@ -76,7 +76,7 @@ Future<void> _syncMissedMessages() async {
       int newCount = 0;
       for (var msg in messages) {
         // We only notify for messages from others
-        final exists = await localDb.getMessages(msg.section, limit: 50); 
+        final exists = await localDb.getMessages(msg.section ?? section, limit: 50); 
         if (!exists.any((e) => e.id == msg.id) && msg.senderId != user.id) {
           await NotificationService.showLocalNotification(
             title: msg.senderName,

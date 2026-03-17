@@ -25,7 +25,7 @@ class TransferProgress {
   });
 }
 
-Future<String> uploadFile(File file, void Function(TransferProgress p) onProgress) async {
+Future<String> uploadFile(File file, void Function(TransferProgress p) onProgress, {String? customName}) async {
   final uri = Uri.parse(uploadEndpoint);
   final length = await file.length();
   int sent = 0;
@@ -47,7 +47,7 @@ Future<String> uploadFile(File file, void Function(TransferProgress p) onProgres
         ),
       );
 
-  final filename = file.path.split(Platform.pathSeparator).last;
+  final filename = customName ?? file.path.split(Platform.pathSeparator).last;
   final multipartFile = http.MultipartFile('file', stream, length, filename: filename);
   final request = http.MultipartRequest('POST', uri)..files.add(multipartFile);
 

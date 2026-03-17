@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'dart:io';
-
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:firebase_messaging/firebase_messaging.dart' hide NotificationSettings;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../models/models.dart';
@@ -127,6 +128,13 @@ class NotificationService {
   static bool _tokenListenerAttached = false;
 
   static Stream<AppNotification> get notifications => _controller.stream;
+  static NotificationSettings? _currentSettings;
+
+  static void updateSettings(NotificationSettings settings) {
+    _currentSettings = settings;
+    // Persist to local specifically for background tasks if needed
+    debugPrint("Notification Service: Current settings updated locally.");
+  }
 
   static Future<void> initialize({bool isBackground = false}) async {
     if (_initialized) return;
@@ -169,6 +177,18 @@ class NotificationService {
       debugPrint("Firebase Messaging Init Error: $e");
       // Keep going, at least local notifications will work
     }
+
+    // 4. Load initial settings
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final stored = prefs.getString('edusync_db_v1');
+      if (stored != null) {
+        final Map<String, dynamic> db = jsonDecode(stored);
+        if (db['settings'] != null) {
+          _currentSettings = NotificationSettings.fromJson(db['settings']['notifications']);
+        }
+      }
+    } catch (_) {}
 
     debugPrint("Notification Service: Initialization complete. Firebase active: ${!isBackground}");
     _initialized = true;
@@ -234,8 +254,20 @@ class NotificationService {
 
     _controller.add(appNotification);
 
-    if (showLocal && (title.isNotEmpty || body.isNotEmpty)) {
+    // Filter by type
+    bool shouldShow = true;
+    if (_currentSettings != null) {
+      if (type == 'chat' || type == 'message') shouldShow = _currentSettings!.chatEnabled;
+      else if (type == 'announcement' || type == 'ann') shouldShow = _currentSettings!.announcementsEnabled;
+      else if (type == 'material' || type == 'resources') shouldShow = _currentSettings!.newMaterials;
+      else if (type == 'schedule' || type == 'class') shouldShow = _currentSettings!.scheduleEnabled;
+      else if (type == 'upcoming') shouldShow = _currentSettings!.upcomingClasses;
+    }
+
+    if (shouldShow && showLocal && (title.isNotEmpty || body.isNotEmpty)) {
       showLocalNotification(title: title, body: body);
+    } else if (!shouldShow) {
+      debugPrint("Notification Service: Suppressed notification of type '$type' due to user settings.");
     }
   }
 

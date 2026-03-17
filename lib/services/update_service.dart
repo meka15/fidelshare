@@ -4,7 +4,7 @@ import '../models/update_info.dart';
 import 'supabase_service.dart';
 
 class UpdateService {
-  static Future<AppUpdateInfo?> checkUpdate() async {
+  static Future<AppUpdateInfo?> getLatestVersion() async {
     try {
       final response = await SupabaseService.client
           .from('app_version')
@@ -14,12 +14,21 @@ class UpdateService {
           .maybeSingle();
 
       if (response == null) return null;
+      return AppUpdateInfo.fromJson(response);
+    } catch (_) {
+      return null;
+    }
+  }
 
-      final updateInfo = AppUpdateInfo.fromJson(response);
+  static Future<AppUpdateInfo?> checkUpdate() async {
+    try {
+      final updateInfo = await getLatestVersion();
+      if (updateInfo == null) return null;
+
       final packageInfo = await PackageInfo.fromPlatform();
       final currentVersion = packageInfo.version;
 
-      if (_isUpdateAvailable(currentVersion, updateInfo.latestVersion)) {
+      if (isUpdateAvailable(currentVersion, updateInfo.latestVersion)) {
         return updateInfo;
       }
     } catch (e) {
@@ -29,19 +38,21 @@ class UpdateService {
   }
 
   static bool isForcedUpdate(String currentVersion, String minVersion) {
-    return _isUpdateAvailable(currentVersion, minVersion);
+    return isUpdateAvailable(currentVersion, minVersion);
   }
 
-  static bool _isUpdateAvailable(String current, String target) {
-    List<int> currentParts = current.split('.').map(int.parse).toList();
-    List<int> targetParts = target.split('.').map(int.parse).toList();
+  static bool isUpdateAvailable(String current, String target) {
+    try {
+      List<int> currentParts = current.split('.').map((s) => int.tryParse(s) ?? 0).toList();
+      List<int> targetParts = target.split('.').map((s) => int.tryParse(s) ?? 0).toList();
 
-    for (int i = 0; i < targetParts.length; i++) {
-      int c = i < currentParts.length ? currentParts[i] : 0;
-      int t = targetParts[i];
-      if (t > c) return true;
-      if (t < c) return false;
-    }
+      for (int i = 0; i < targetParts.length; i++) {
+        int c = i < currentParts.length ? currentParts[i] : 0;
+        int t = targetParts[i];
+        if (t > c) return true;
+        if (t < c) return false;
+      }
+    } catch (_) {}
     return false;
   }
 }

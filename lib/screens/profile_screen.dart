@@ -1,9 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'dart:io';
 import '../models/models.dart';
+import '../models/update_info.dart';
 import '../services/supabase_service.dart';
 import '../services/notification_service.dart';
+import '../services/update_service.dart';
+import '../services/storage_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   final Student student;
@@ -27,6 +34,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isResetting = false;
   String? _resetMessage;
   bool _resetSuccess = false;
+  bool _isCheckingUpdate = false;
+  bool _isPublishing = false;
+  String _currentVersion = "";
+  double _uploadProgress = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAppInfo();
+  }
+
+  Future<void> _loadAppInfo() async {
+    final info = await PackageInfo.fromPlatform();
+    if (mounted) {
+      setState(() {
+        _currentVersion = info.version;
+      });
+    }
+  }
 
   // Colors aligned with your Light SaaS Theme
   final Color _primaryBlue = const Color(0xFF2563EB);
@@ -109,19 +135,198 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _handleUpdateCheck() async {
+    setState(() => _isCheckingUpdate = true);
+    try {
+      final update = await UpdateService.checkUpdate();
+      if (!mounted) return;
+
+      if (update == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Your app is up to date!'), behavior: SnackBarBehavior.floating),
+        );
+      } else {
+        _showUpdateDialog(update);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error checking update: $e'), behavior: SnackBarBehavior.floating),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isCheckingUpdate = false);
+    }
+  }
+
+  void _showUpdateDialog(AppUpdateInfo update) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Text('Update Available', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('A new version (${update.latestVersion}) is available.'),
+            if (update.releaseNotes != null) ...[
+              const SizedBox(height: 12),
+              const Text('What\'s new:', style: TextStyle(fontWeight: FontWeight.bold)),
+              Text(update.releaseNotes!),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Later')),
+          ElevatedButton(
+            onPressed: () async {
+              final url = Uri.parse(update.updateUrl);
+              if (await canLaunchUrl(url)) {
+                await launchUrl(url, mode: LaunchMode.externalApplication);
+              }
+              if (mounted) Navigator.pop(context);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _primaryBlue,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: const Text('Update Now'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handlePublishUpdate() async {
+    setState(() => _isPublishing = true);
+    try {
+      final latest = await UpdateService.getLatestVersion();
+      final currentVersion = _currentVersion; // Gotten from package_info in initState
+      
+      if (latest != null && !UpdateService.isUpdateAvailable(latest.latestVersion, currentVersion)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Version $currentVersion is already published (or newer than published).'), 
+              behavior: SnackBarBehavior.floating
+            ),
+          );
+        }
+        setState(() => _isPublishing = false);
+        return;
+      }
+
+      const channel = MethodChannel('com.example.fidelshare/app_info');
+      final String? apkPath = await channel.invokeMethod<String>('getApkPath');
+      
+      if (apkPath == null) {
+        throw Exception('Could not locate app self-executable.');
+      }
+      
+      final file = File(apkPath);
+      if (!(await file.exists())) {
+        throw Exception('App APK file not found at $apkPath');
+      }
+
+      if (!mounted) return;
+
+      final details = await _promptUpdateDetails();
+      if (details == null) {
+        setState(() => _isPublishing = false);
+        return;
+      }
+
+      _uploadProgress = 0;
+
+      // 1. Upload to Alwaysdata
+      final url = await uploadFile(file, (p) {
+        if (mounted) setState(() => _uploadProgress = p.percentage / 100);
+      }, customName: 'fidelshare_v${details['version']}.apk');
+
+      // 2. Save to Supabase
+      await SupabaseService.client.from('app_version').insert({
+        'latest_version': details['version'],
+        'min_version': details['minVersion'],
+        'update_url': url,
+        'release_notes': details['notes'],
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Update published successfully!'), behavior: SnackBarBehavior.floating),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Publish failed: $e'), backgroundColor: Colors.red, behavior: SnackBarBehavior.floating),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isPublishing = false);
+    }
+  }
+
+  Future<Map<String, String>?> _promptUpdateDetails() async {
+    final vController = TextEditingController(text: _currentVersion);
+    final mvController = TextEditingController(text: _currentVersion);
+    final nController = TextEditingController();
+    
+    return showDialog<Map<String, String>>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Text('New Update Metadata'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: vController, decoration: const InputDecoration(labelText: 'App Version', hintText: 'e.g. 1.0.5')),
+              TextField(controller: mvController, decoration: const InputDecoration(labelText: 'Min Requirement', hintText: 'To force update')),
+              TextField(controller: nController, maxLines: 3, decoration: const InputDecoration(labelText: 'Release Notes')),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () {
+              if (vController.text.isEmpty) return;
+              Navigator.pop(context, {
+                'version': vController.text,
+                'minVersion': mvController.text.isEmpty ? vController.text : mvController.text,
+                'notes': nController.text,
+              });
+            },
+            child: const Text('Publish'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        title: Text('Profile', style: GoogleFonts.plusJakartaSans(color: _textDark, fontWeight: FontWeight.bold)),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        children: [
+    return Column(
+      children: [
+        // Custom Header (replaces AppBar)
+        Container(
+          padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top + 10, bottom: 10, left: 20, right: 20),
+          color: Colors.white,
+          child: Row(
+            children: [
+              Text('Profile', 
+                style: GoogleFonts.plusJakartaSans(color: _textDark, fontWeight: FontWeight.bold, fontSize: 20)),
+            ],
+          ),
+        ),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            children: [
           // Header Card
           const SizedBox(height: 20),
           Center(child: _buildAvatar()),
@@ -137,10 +342,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
           if (widget.student.isRepresentative)
             Center(
               child: Container(
-                margin: const EdgeInsets.only(top: 8),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                decoration: BoxDecoration(color: _primaryBlue.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
-                child: Text('Representative', style: TextStyle(color: _primaryBlue, fontSize: 12, fontWeight: FontWeight.bold)),
+                margin: const EdgeInsets.only(top: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(colors: [_primaryBlue, _primaryBlue.withOpacity(0.8)]),
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(color: _primaryBlue.withOpacity(0.2), blurRadius: 8, offset: const Offset(0, 4))
+                  ],
+                ),
+                child: const Text('Representative Account', 
+                  style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
               ),
             ),
 
@@ -188,16 +400,67 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _buildSectionHeader('Security'),
           _buildActionTile(
             'Reset Password', 
-            'Sends OTP to your email', 
+            'Update your login security', 
             Icons.lock_outline,
             _isResetting ? null : _handlePasswordReset,
             isLoading: _isResetting
           ),
           if (_resetMessage != null)
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Text(_resetMessage!, style: TextStyle(color: _resetSuccess ? Colors.green : Colors.red, fontSize: 12)),
+            Container(
+              margin: const EdgeInsets.only(bottom: 12, top: -4),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: _resetSuccess ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Icon(_resetSuccess ? Icons.check_circle_outline : Icons.error_outline, 
+                    size: 16, color: _resetSuccess ? Colors.green : Colors.red),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(_resetMessage!, 
+                      style: TextStyle(color: _resetSuccess ? Colors.green : Colors.red, fontSize: 12, fontWeight: FontWeight.w500)),
+                  ),
+                ],
+              ),
             ),
+
+          _buildSectionHeader('App Info'),
+          _buildActionTile(
+            'Online Update', 
+            _currentVersion.isEmpty ? 'Check for latest version' : 'Version $_currentVersion', 
+            Icons.system_update_outlined,
+            _isCheckingUpdate ? null : _handleUpdateCheck,
+            isLoading: _isCheckingUpdate
+          ),
+          if (widget.student.isRepresentative) ...[
+            _buildActionTile(
+              'Publish New Version', 
+              _isPublishing ? 'Uploading... ${(_uploadProgress * 100).toInt()}%' : 'Cloud-Sync this build to students', 
+              Icons.cloud_upload_outlined,
+              _isPublishing ? null : _handlePublishUpdate,
+              isLoading: _isPublishing
+            ),
+            if (_isPublishing)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16, left: 4, right: 4),
+                child: Column(
+                  children: [
+                    LinearProgressIndicator(
+                      value: _uploadProgress,
+                      backgroundColor: _bgLight,
+                      color: _primaryBlue,
+                      minHeight: 6,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                    const SizedBox(height: 4),
+                    Text('${(_uploadProgress * 100).toInt()}% uploaded', 
+                      style: TextStyle(color: _textGray, fontSize: 10, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
+          ],
 
           const SizedBox(height: 40),
           ElevatedButton(
@@ -211,9 +474,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             child: const Text('Sign Out', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
-          const SizedBox(height: 40),
-        ],
-      ),
+          const SizedBox(height: 120), // Extra space for floating bottom nav
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -234,28 +499,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildActionTile(String title, String sub, IconData icon, VoidCallback? onTap, {bool isLoading = false}) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: _bgLight, borderRadius: BorderRadius.circular(16)),
-        child: Row(
-          children: [
-            Icon(icon, color: _primaryBlue),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: TextStyle(color: _textDark, fontWeight: FontWeight.w600, fontSize: 15)),
-                  Text(sub, style: TextStyle(color: _textGray, fontSize: 12)),
-                ],
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(color: _bgLight, borderRadius: BorderRadius.circular(16)),
+          child: Row(
+            children: [
+              Icon(icon, color: _primaryBlue),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: TextStyle(color: _textDark, fontWeight: FontWeight.w600, fontSize: 15)),
+                    Text(sub, style: TextStyle(color: _textGray, fontSize: 12)),
+                  ],
+                ),
               ),
-            ),
-            isLoading 
-              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-              : Icon(Icons.chevron_right, color: _textGray),
-          ],
+              isLoading 
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  : Icon(Icons.chevron_right, color: _textGray),
+            ],
+          ),
         ),
       ),
     );
@@ -273,6 +542,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       sync: widget.settings.sync,
       appearance: widget.settings.appearance,
+      facultyVisible: widget.settings.facultyVisible,
     ));
   }
 

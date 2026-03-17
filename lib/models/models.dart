@@ -12,6 +12,7 @@ class Student {
   final bool isRepresentative;
   final String section;
   final int? batch;
+  final String? avatarUrl;
 
   Student({
     required this.name,
@@ -19,6 +20,7 @@ class Student {
     required this.isRepresentative,
     required this.section,
     this.batch,
+    this.avatarUrl,
   });
 
   factory Student.fromJson(Map<String, dynamic> json) {
@@ -28,6 +30,7 @@ class Student {
       isRepresentative: json['isRepresentative'],
       section: json['section'],
       batch: json['batch'],
+      avatarUrl: json['avatarUrl'],
     );
   }
 
@@ -38,6 +41,7 @@ class Student {
       'isRepresentative': isRepresentative,
       'section': section,
       'batch': batch,
+      'avatarUrl': avatarUrl,
     };
   }
 }
@@ -259,9 +263,11 @@ class ChatMessage {
   final String role; // 'user' | 'model'
   final String senderId;
   final String senderName;
+  final String? senderAvatarUrl;
   final String text;
   final int timestamp;
-  final String section;
+  final String? section;
+  final String? groupId;
   final bool isEdited;
   final List<Map<String, String>> seenBy;
 
@@ -270,9 +276,11 @@ class ChatMessage {
     required this.role,
     required this.senderId,
     required this.senderName,
+    this.senderAvatarUrl,
     required this.text,
     required this.timestamp,
-    required this.section,
+    this.section,
+    this.groupId,
     this.isEdited = false,
     this.seenBy = const [],
   });
@@ -283,9 +291,11 @@ class ChatMessage {
       role: json['role'],
       senderId: json['senderId'],
       senderName: json['senderName'],
+      senderAvatarUrl: json['senderAvatarUrl'],
       text: json['text'],
       timestamp: json['timestamp'],
       section: json['section'],
+      groupId: json['groupId'],
       isEdited: json['isEdited'] ?? false,
       seenBy: json['seenBy'] != null 
           ? List<Map<String, String>>.from(
@@ -300,11 +310,61 @@ class ChatMessage {
       'role': role,
       'senderId': senderId,
       'senderName': senderName,
+      'senderAvatarUrl': senderAvatarUrl,
       'text': text,
       'timestamp': timestamp,
       'section': section,
+      'groupId': groupId,
       'isEdited': isEdited,
       'seenBy': seenBy,
+    };
+  }
+}
+
+class ChatGroup {
+  final String id;
+  final String name;
+  final String? description;
+  final String createdBy;
+  final int createdAt;
+  final List<String> members;
+  final String? avatarUrl;
+  final bool isPublic;
+
+  ChatGroup({
+    required this.id,
+    required this.name,
+    this.description,
+    required this.createdBy,
+    required this.createdAt,
+    required this.members,
+    this.avatarUrl,
+    this.isPublic = false,
+  });
+
+  factory ChatGroup.fromJson(Map<String, dynamic> json) {
+    return ChatGroup(
+      id: json['id'],
+      name: json['name'],
+      description: json['description'],
+      createdBy: json['createdBy'] ?? json['created_by'],
+      createdAt: json['createdAt'] ?? (json['created_at'] != null ? DateTime.parse(json['created_at']).millisecondsSinceEpoch : DateTime.now().millisecondsSinceEpoch),
+      members: json['members'] != null ? List<String>.from(json['members']) : [],
+      avatarUrl: json['avatarUrl'] ?? json['avatar_url'],
+      isPublic: json['isPublic'] ?? json['is_public'] ?? false,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'description': description,
+      'createdBy': createdBy,
+      'createdAt': createdAt,
+      'members': members,
+      'avatarUrl': avatarUrl,
+      'isPublic': isPublic,
     };
   }
 }
