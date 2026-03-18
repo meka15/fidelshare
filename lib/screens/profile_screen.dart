@@ -2,15 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'dart:io';
+import 'package:open_filex/open_filex.dart';
+import 'package:path_provider/path_provider.dart';
+import '../services/storage_service.dart';
 import '../models/models.dart';
 import '../models/update_info.dart';
 import '../services/supabase_service.dart';
 import '../services/notification_service.dart';
 import '../services/update_service.dart';
-import '../services/storage_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   final Student student;
@@ -38,6 +41,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isPublishing = false;
   String _currentVersion = "";
   double _uploadProgress = 0;
+  bool _isDownloadingUpdate = false;
+  double _updateDownloadProgress = 0;
 
   @override
   void initState() {
@@ -178,27 +183,86 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Later')),
-          ElevatedButton(
+          TextButton(
             onPressed: () async {
-              final url = Uri.parse(update.updateUrl);
-              try {
-                await launchUrl(url, mode: LaunchMode.externalApplication);
-              } catch (e) {
-                // Robust Fallback
-                if (await canLaunchUrl(url)) {
-                  await launchUrl(url);
-                }
-              }
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setString('ignored_update_version', update.latestVersion);
               if (mounted) Navigator.pop(context);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _primaryBlue,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            child: const Text('Update Now'),
+            }, 
+            child: const Text('Skip Version', style: TextStyle(color: Colors.grey))
           ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Later')),
+          StatefulBuilder(builder: (context, setDialogState) {
+            if (_isDownloadingUpdate) {
+              return Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    LinearProgressIndicator(
+                      value: _updateDownloadProgress,
+                      backgroundColor: Colors.grey[200],
+                      color: _primaryBlue,
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                    const SizedBox(height: 8),
+                    Text('${(_updateDownloadProgress * 100).toInt()}% downloaded',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              );
+            }
+            return ElevatedButton(
+              onPressed: () async {
+                if (Platform.isAndroid) {
+                  setDialogState(() {
+                    _isDownloadingUpdate = true;
+                    _updateDownloadProgress = 0;
+                  });
+                  try {
+                    final tempDir = await getTemporaryDirectory();
+                    final file = await downloadFileChunked(
+                      update.updateUrl,
+                      'fidelshare_v${update.latestVersion}.apk',
+                      (p) {
+                        setDialogState(() {
+                          _updateDownloadProgress = p.percentage / 100;
+                        });
+                      },
+                      targetDir: tempDir,
+                    );
+                    setDialogState(() {
+                      _isDownloadingUpdate = false;
+                    });
+                    final result = await OpenFilex.open(file.path);
+                    if (result.type != ResultType.done) {
+                      throw Exception(result.message);
+                    }
+                  } catch (e) {
+                    setDialogState(() => _isDownloadingUpdate = false);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Installation failed: $e')),
+                      );
+                      // Fallback
+                      final url = Uri.parse(update.updateUrl);
+                      launchUrl(url, mode: LaunchMode.externalApplication);
+                    }
+                  }
+                } else {
+                  final url = Uri.parse(update.updateUrl);
+                  launchUrl(url, mode: LaunchMode.externalApplication);
+                }
+                if (mounted) Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _primaryBlue,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: const Text('Update Now'),
+            );
+          }),
         ],
       ),
     );
@@ -246,15 +310,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _uploadProgress = 0;
 
       // 1. Upload to Alwaysdata
-      final url = await uploadFile(file, (p) {
+      final rawUrl = await uploadFile(file, (p) {
         if (mounted) setState(() => _uploadProgress = p.percentage / 100);
       }, customName: 'fidelshare_v${details['version']}.apk');
+
+      // 1.5 Convert to download.php if it's from our server
+      String finalUpdateUrl = rawUrl;
+      if (rawUrl.contains('alwaysdata.net')) {
+        final filename = 'fidelshare_v${details['version']}.apk';
+        finalUpdateUrl = '${downloadEndpoint}?file=$filename';
+      }
 
       // 2. Save to Supabase
       await SupabaseService.client.from('app_version').insert({
         'latest_version': details['version'],
         'min_version': details['minVersion'],
-        'update_url': url,
+        'update_url': finalUpdateUrl,
         'release_notes': details['notes'],
         'updated_at': DateTime.now().toIso8601String(),
       });

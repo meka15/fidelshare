@@ -42,16 +42,36 @@ class UpdateService {
   }
 
   static bool isUpdateAvailable(String current, String target) {
+    if (current.trim() == target.trim()) return false;
+    
     try {
-      List<int> currentParts = current.split('.').map((s) => int.tryParse(s) ?? 0).toList();
-      List<int> targetParts = target.split('.').map((s) => int.tryParse(s) ?? 0).toList();
+      // Strip build numbers and trim whitespace (e.g., 1.0.2+3 -> 1.0.2)
+      String cleanCurrent = current.split('+')[0].trim();
+      String cleanTarget = target.split('+')[0].trim();
 
-      for (int i = 0; i < targetParts.length; i++) {
+      List<int> currentParts = cleanCurrent.split('.').map((s) => int.tryParse(s.trim()) ?? 0).toList();
+      List<int> targetParts = cleanTarget.split('.').map((s) => int.tryParse(s.trim()) ?? 0).toList();
+
+      int maxLength = currentParts.length > targetParts.length ? currentParts.length : targetParts.length;
+
+      for (int i = 0; i < maxLength; i++) {
         int c = i < currentParts.length ? currentParts[i] : 0;
-        int t = targetParts[i];
+        int t = i < targetParts.length ? targetParts[i] : 0;
+        
         if (t > c) return true;
         if (t < c) return false;
       }
+
+      // If main versions are exact matches, check build numbers (+ sign)
+      int buildCurrent = 0;
+      int buildTarget = 0;
+      if (current.contains('+')) {
+        buildCurrent = int.tryParse(current.split('+')[1]) ?? 0;
+      }
+      if (target.contains('+')) {
+        buildTarget = int.tryParse(target.split('+')[1]) ?? 0;
+      }
+      return buildTarget > buildCurrent;
     } catch (_) {}
     return false;
   }

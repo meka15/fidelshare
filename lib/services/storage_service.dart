@@ -6,8 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 String get uploadEndpoint => dotenv.get('UPLOAD_ENDPOINT', fallback: 'https://mekbib.alwaysdata.net/students/upload.php');
-
-String get storageProviderLabel => 'alwaysdata.net';
+String get downloadEndpoint => dotenv.get('DOWNLOAD_ENDPOINT', fallback: 'https://mekbib.alwaysdata.net/students/download.php');
 
 class TransferProgress {
   final int loaded;
@@ -69,11 +68,13 @@ Future<String> uploadFile(File file, void Function(TransferProgress p) onProgres
 Future<File> downloadFileChunked(
   String url,
   String fileName,
-  void Function(TransferProgress p) onProgress,
-) async {
+  void Function(TransferProgress p) onProgress, {
+  Directory? targetDir,
+}) async {
   final uri = Uri.parse(url);
+  final client = http.Client();
   final request = http.Request('GET', uri);
-  final response = await request.send();
+  final response = await client.send(request);
 
   if (response.statusCode < 200 || response.statusCode >= 300) {
     throw Exception('Download failed with status ${response.statusCode}');
@@ -81,26 +82,11 @@ Future<File> downloadFileChunked(
 
   final total = response.contentLength ?? 0;
   int loaded = 0;
-  final chunks = <List<int>>[];
 
-  await for (final chunk in response.stream) {
-    chunks.add(chunk);
-    loaded += chunk.length;
-    if (total > 0) {
-      final percentage = ((loaded / total) * 100).round();
-      onProgress(TransferProgress(
-        loaded: loaded,
-        total: total,
-        percentage: percentage,
-        chunkIndex: 0,
-        totalChunks: 1,
-      ));
-    }
-  }
-
-  final bytes = chunks.expand((e) => e).toList();
   Directory downloadsDir;
-  if (Platform.isAndroid || Platform.isIOS) {
+  if (targetDir != null) {
+    downloadsDir = targetDir;
+  } else if (Platform.isAndroid || Platform.isIOS) {
     downloadsDir = await getApplicationDocumentsDirectory();
   } else {
     final home = Platform.environment['HOME'] ?? Directory.current.path;
@@ -109,8 +95,31 @@ Future<File> downloadFileChunked(
       downloadsDir.createSync(recursive: true);
     }
   }
-  final file = File('${downloadsDir.path}/${fileName}_asset');
-  await file.writeAsBytes(bytes);
+
+  final filePath = '${downloadsDir.path}/$fileName';
+  final file = File(filePath);
+  final iosink = file.openWrite();
+
+  try {
+    await for (final chunk in response.stream) {
+      iosink.add(chunk);
+      loaded += chunk.length;
+      if (total > 0) {
+        final percentage = ((loaded / total) * 100).round();
+        onProgress(TransferProgress(
+          loaded: loaded,
+          total: total,
+          percentage: percentage,
+          chunkIndex: 0,
+          totalChunks: 1,
+        ));
+      }
+    }
+  } finally {
+    await iosink.close();
+    client.close();
+  }
+  
   return file;
 }
 

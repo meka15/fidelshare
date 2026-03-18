@@ -137,7 +137,15 @@ Future<String?> _pickUploadCategory() async {
     });
 
     try {
-      final url = await uploadFile(file, (p) => setState(() => _progress = p));
+      final rawUrl = await uploadFile(file, (p) => setState(() => _progress = p));
+      
+      // Use download.php for safer/controlled downloads if on our server
+      String finalUrl = rawUrl;
+      if (rawUrl.contains('alwaysdata.net')) {
+        final filename = file.path.split(Platform.pathSeparator).last;
+        finalUrl = '$downloadEndpoint?file=$filename';
+      }
+
       setState(() => _isGeneratingSummary = true);
 
       final summary = await GeminiService.summarizeMaterial(
@@ -147,7 +155,7 @@ Future<String?> _pickUploadCategory() async {
 
       final newMaterial = StudyMaterial(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
-        url: url,
+        url: finalUrl,
         name: widget.student.name,
         timestamp: DateTime.now().millisecondsSinceEpoch,
         uploaderId: widget.student.studentId,

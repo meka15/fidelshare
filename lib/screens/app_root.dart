@@ -10,6 +10,10 @@ import 'main_screen.dart';
 import 'login_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'dart:io';
+import 'package:open_filex/open_filex.dart';
+import 'package:path_provider/path_provider.dart';
+import '../services/storage_service.dart';
 import '../models/update_info.dart';
 import '../services/update_service.dart';
 import '../widgets/splash_screen.dart';
@@ -37,6 +41,11 @@ class _AppRootState extends State<AppRoot> {
   List<AppNotification> _notifications = [];
   Set<String> _viewedAnnIds = {};
   bool _hasSyncedOnce = false;
+
+  // App Update State
+  bool _isDownloadingUpdate = false;
+  double _updateDownloadProgress = 0;
+  String? _updateFilePath;
   StreamSubscription<AppNotification>? _notifSub;
   RealtimeChannel? _chatChannel;
   String? _chatSectionId;
@@ -954,6 +963,12 @@ class _AppRootState extends State<AppRoot> {
       final currentVersion = packageInfo.version;
       final isForced = UpdateService.isForcedUpdate(currentVersion, update.minVersion);
 
+      if (!isForced) {
+        final prefs = await SharedPreferences.getInstance();
+        final ignoredVersion = prefs.getString('ignored_update_version');
+        if (ignoredVersion == update.latestVersion) return;
+      }
+
       _showUpdateDialog(update, isForced);
     } catch (_) {
       // ignore
@@ -997,27 +1012,98 @@ class _AppRootState extends State<AppRoot> {
           actions: [
             if (!isForced)
               TextButton(
+                onPressed: () async {
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setString('ignored_update_version', update.latestVersion);
+                  if (mounted) Navigator.pop(context);
+                },
+                child: const Text('Skip Version', style: TextStyle(color: Colors.grey)),
+              ),
+            if (!isForced)
+              TextButton(
                 onPressed: () => Navigator.pop(context),
                 child: const Text('Maybe Later', style: TextStyle(color: Colors.grey)),
               ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2563EB),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-              onPressed: () async {
-                final url = Uri.parse(update.updateUrl);
-                try {
-                  await launchUrl(url, mode: LaunchMode.externalApplication);
-                } catch (e) {
-                  // Fallback for cases where direct external launch fails
-                  if (await canLaunchUrl(url)) {
-                    await launchUrl(url);
-                  }
+            StatefulBuilder(
+              builder: (context, setDialogState) {
+                if (_isDownloadingUpdate) {
+                  return Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        LinearProgressIndicator(
+                          value: _updateDownloadProgress,
+                          backgroundColor: Colors.grey[200],
+                          color: const Color(0xFF2563EB),
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '${(_updateDownloadProgress * 100).toInt()}% downloaded',
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  );
                 }
+                return ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2563EB),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () async {
+                    if (Platform.isAndroid) {
+                      setDialogState(() {
+                        _isDownloadingUpdate = true;
+                        _updateDownloadProgress = 0;
+                      });
+
+                      try {
+                        final tempDir = await getTemporaryDirectory();
+                        final file = await downloadFileChunked(
+                          update.updateUrl,
+                          'fidelshare_v${update.latestVersion}.apk',
+                          (p) {
+                            setDialogState(() {
+                              _updateDownloadProgress = p.percentage / 100;
+                            });
+                          },
+                          targetDir: tempDir,
+                        );
+
+                        setDialogState(() {
+                          _isDownloadingUpdate = false;
+                        });
+
+                        // Attempt to open the APK
+                        final result = await OpenFilex.open(file.path);
+                        if (result.type != ResultType.done) {
+                          throw Exception(result.message);
+                        }
+                      } catch (e) {
+                        setDialogState(() {
+                          _isDownloadingUpdate = false;
+                        });
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Installation failed: $e. Using fallback launcher.')),
+                          );
+                          // Fallback to browser if in-app failed
+                          final url = Uri.parse(update.updateUrl);
+                          await launchUrl(url, mode: LaunchMode.externalApplication);
+                        }
+                      }
+                    } else {
+                      // Desktop/iOS fallback
+                      final url = Uri.parse(update.updateUrl);
+                      await launchUrl(url, mode: LaunchMode.externalApplication);
+                    }
+                  },
+                  child: const Text('Update Now'),
+                );
               },
-              child: const Text('Update Now'),
             ),
           ],
         ),
