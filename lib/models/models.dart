@@ -114,6 +114,8 @@ class FacultyContact {
   final String? phoneNumber;
   final String? email;
   final String? section;
+  final double averageRating;
+  final int reviewCount;
 
   FacultyContact({
     required this.id,
@@ -123,6 +125,8 @@ class FacultyContact {
     this.phoneNumber,
     this.email,
     this.section,
+    this.averageRating = 0.0,
+    this.reviewCount = 0,
   });
 
   factory FacultyContact.fromJson(Map<String, dynamic> json) {
@@ -134,6 +138,8 @@ class FacultyContact {
       phoneNumber: json['phoneNumber'],
       email: json['email'],
       section: json['section'],
+      averageRating: (json['averageRating'] ?? 0.0).toDouble(),
+      reviewCount: json['reviewCount'] ?? 0,
     );
   }
 
@@ -146,6 +152,8 @@ class FacultyContact {
       'phoneNumber': phoneNumber,
       'email': email,
       'section': section,
+      'averageRating': averageRating,
+      'reviewCount': reviewCount,
     };
   }
 }

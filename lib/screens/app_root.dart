@@ -1008,8 +1008,13 @@ class _AppRootState extends State<AppRoot> {
               ),
               onPressed: () async {
                 final url = Uri.parse(update.updateUrl);
-                if (await canLaunchUrl(url)) {
+                try {
                   await launchUrl(url, mode: LaunchMode.externalApplication);
+                } catch (e) {
+                  // Fallback for cases where direct external launch fails
+                  if (await canLaunchUrl(url)) {
+                    await launchUrl(url);
+                  }
                 }
               },
               child: const Text('Update Now'),

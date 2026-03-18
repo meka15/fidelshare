@@ -146,6 +146,8 @@ class FacultyContactsView extends StatelessWidget {
             const SizedBox(height: 16),
             Text(contact.name, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
             Text(contact.role, style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: colorScheme.secondary)),
+            const SizedBox(height: 12),
+            _buildAverageRating(context, contact),
             const SizedBox(height: 24),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -162,7 +164,113 @@ class FacultyContactsView extends StatelessWidget {
                   "Call", 
                   contact.phoneNumber != null ? () => launchUrl(Uri.parse('tel:${contact.phoneNumber}')) : null,
                 ),
+                _buildContactAction(
+                  context, 
+                  Icons.star_outline_rounded, 
+                  "Rate", 
+                  () => _showRatingPrompt(context, contact),
+                ),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAverageRating(BuildContext context, FacultyContact contact) {
+    // Hardcoded for now: Use ID to generate some consistent dummy ratings
+    final rating = contact.averageRating > 0 ? contact.averageRating : (contact.id.hashCode % 15 + 35) / 10;
+    final reviews = contact.reviewCount > 0 ? contact.reviewCount : (contact.id.hashCode % 50 + 10);
+    
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Row(
+          children: List.generate(5, (index) {
+            final starValue = index + 1;
+            return Icon(
+              starValue <= rating.floor() ? Icons.star_rounded : 
+              (index < rating ? Icons.star_half_rounded : Icons.star_outline_rounded),
+              color: Colors.amber,
+              size: 20,
+            );
+          }),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          rating.toStringAsFixed(1),
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          "($reviews reviews)",
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
+    );
+  }
+
+  void _showRatingPrompt(BuildContext context, FacultyContact contact) {
+    int selectedStars = 0;
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          title: const Text("Rate Faculty"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text("How would you rate ${contact.name.split(' ').first}'s performance?"),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(5, (index) {
+                  final starIndex = index + 1;
+                  return IconButton(
+                    onPressed: () => setDialogState(() => selectedStars = starIndex),
+                    icon: Icon(
+                      starIndex <= selectedStars ? Icons.star_rounded : Icons.star_outline_rounded,
+                      color: Colors.amber,
+                      size: 32,
+                    ),
+                  );
+                }),
+              ),
+              if (selectedStars > 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(
+                    selectedStars == 5 ? "Excellent!" : 
+                    selectedStars >= 4 ? "Very Good" : 
+                    selectedStars >= 3 ? "Good" : "Fair",
+                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
+                  ),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: selectedStars == 0 ? null : () {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text("Thanks for rating ${contact.name}! (Hardcoded Preview)"),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: const Text("Submit"),
             ),
           ],
         ),

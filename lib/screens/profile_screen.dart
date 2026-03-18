@@ -182,8 +182,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ElevatedButton(
             onPressed: () async {
               final url = Uri.parse(update.updateUrl);
-              if (await canLaunchUrl(url)) {
+              try {
                 await launchUrl(url, mode: LaunchMode.externalApplication);
+              } catch (e) {
+                // Robust Fallback
+                if (await canLaunchUrl(url)) {
+                  await launchUrl(url);
+                }
               }
               if (mounted) Navigator.pop(context);
             },
